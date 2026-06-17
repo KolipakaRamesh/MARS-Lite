@@ -88,12 +88,8 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# ── Convex (legacy — no longer used in MARS-Lite) ─────────────────
-.convex/
-convex/_generated/
-
 # ── Misc ──────────────────────────────────────────────────────────
 *.bak
 *.tmp
 *.orig
+
