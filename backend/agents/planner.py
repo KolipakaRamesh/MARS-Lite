@@ -35,10 +35,16 @@ class PlannerAgent(BaseAgent):
     @trace_agent("planner")
     async def run(self, state: AgentState) -> dict:
         query = state["query"]
+        memory_context = state.get("memory_context", "")
+
+        user_input = query
+        if memory_context:
+            user_input = f"PAST RESEARCH CONTEXT:\n{memory_context}\n\nCURRENT QUERY:\n{query}"
+
         logger.info("[Planner] Decomposing query: %s", query[:80])
 
         try:
-            raw, usage = await self.llm.invoke_with_usage(PLANNER_SYSTEM_PROMPT, query)
+            raw, usage = await self.llm.invoke_with_usage(PLANNER_SYSTEM_PROMPT, user_input)
             subtasks = self._parse_subtasks(raw)
         except Exception as exc:
             logger.warning("[Planner] Failed, falling back to single subtask: %s", exc)

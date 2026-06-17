@@ -104,6 +104,7 @@ class QueryResponse(BaseModel):
     agent_trace:        list[dict] = []
     evaluation:         dict       = {}
     memory:             dict       = {}
+    memory_context_tokens: int     = 0
     error:              str | None = None
 
 
@@ -158,6 +159,7 @@ async def run_query(req: QueryRequest):
         agent_trace=final_state.get("agent_trace", []),
         evaluation=result,
         memory=mem,
+        memory_context_tokens=final_state.get("memory_context_tokens", 0),
         error=final_state.get("error"),
     )
 
@@ -217,6 +219,7 @@ async def run_stream(
                 "agent_trace": final_state.get("agent_trace", []),
                 "evaluation":  result,
                 "memory":      mem,
+                "memory_context_tokens": final_state.get("memory_context_tokens", 0),
             })
 
         except Exception as exc:

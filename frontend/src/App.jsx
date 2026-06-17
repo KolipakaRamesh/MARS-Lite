@@ -226,8 +226,8 @@ export default function App() {
   // Derived data
   const agentEndEvents = timeline.filter(e => e.type === 'agent_end');
   const totalDuration  = agentEndEvents.reduce((s, e) => s + (e.duration_ms || 0), 0);
-  const totalTokens    = agentEndEvents.reduce((s, e) => s + (e.total_tokens || 0), 0);
-  const maxTokens      = Math.max(...agentEndEvents.map(e => e.total_tokens || 0), 1);
+  const totalTokens    = agentEndEvents.reduce((s, e) => s + (e.total_tokens || 0), 0) + (result?.memory_context_tokens || 0);
+  const maxTokens      = Math.max(...agentEndEvents.map(e => e.total_tokens || 0), result?.memory_context_tokens || 0, 1);
 
   // Context handoff from result
   const contextHandoffs = result ? [
@@ -368,6 +368,16 @@ export default function App() {
               ? <div className="empty-hint"><Info size={13}/> Token counts appear after execution</div>
               : <>
                   <div className="token-section">
+                    {result?.memory_context_tokens > 0 && (
+                      <div className="token-agent-block" style={{ borderLeft: '2px solid #ec4899', paddingLeft: '8px', marginBottom: '12px' }}>
+                        <div className="token-agent-name" style={{ color: '#ec4899' }}>
+                          <MemoryStick size={12}/> Context Memory
+                          <span className="token-model">local-cache</span>
+                        </div>
+                        <TokenBar label="In"    value={result.memory_context_tokens}    max={maxTokens} color="#ec4899" />
+                        <TokenBar label="Total" value={result.memory_context_tokens} max={maxTokens} color="#ec4899" />
+                      </div>
+                    )}
                     {agentEndEvents.map((e, i) => {
                       const meta = AGENT_COLORS[e.agent_name] || DEFAULT_COLOR;
                       return (

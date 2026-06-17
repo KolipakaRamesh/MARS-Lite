@@ -14,6 +14,10 @@ class AgentState(TypedDict):
     query: str
     session_id: str
 
+    # ── Context Memory ───────────────────────────────────────────────────────
+    memory_context: str
+    memory_context_tokens: int
+
     # ── Planner output ───────────────────────────────────────────────────────
     subtasks: List[str]
     current_subtask_index: int
@@ -41,9 +45,26 @@ class AgentState(TypedDict):
 
 def initial_state(query: str, session_id: str = "default") -> AgentState:
     """Factory — returns a clean initial state for a new query."""
+    import backend.memory.simple_memory as simple_memory
+    mem = simple_memory.retrieve()
+    history = mem.get("history", [])
+    if history:
+        # Format last 3 queries as context memory
+        memory_context = "Recent Search History:\n" + "\n".join([
+            f"- Past Query: {h['last_query']} (Category: {h['last_category']}, Budget: {h.get('last_budget') or 'N/A'})"
+            for h in history[:3]
+        ])
+    else:
+        memory_context = ""
+    
+    # Estimate tokens (~4 characters per token)
+    memory_context_tokens = len(memory_context) // 4 if memory_context else 0
+
     return AgentState(
         query=query,
         session_id=session_id,
+        memory_context=memory_context,
+        memory_context_tokens=memory_context_tokens,
         subtasks=[],
         current_subtask_index=0,
         raw_research=[],
