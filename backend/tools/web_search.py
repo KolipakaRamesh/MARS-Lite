@@ -21,7 +21,10 @@ def web_search(query: str, max_results: int = 5) -> str:
         Formatted string of results or an error message.
     """
     try:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
 
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
