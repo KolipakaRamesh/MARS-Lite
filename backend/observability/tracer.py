@@ -115,6 +115,7 @@ def trace_agent(span_name: str) -> Callable:
                 "timestamp":  start_time.isoformat(),
                 "query":      state.get("query", ""),
                 "subtask_index": state.get("current_subtask_index", 0),
+                "memory_context_tokens": state.get("memory_context_tokens", 0),
             })
 
             status = "success"
@@ -155,6 +156,7 @@ def trace_agent(span_name: str) -> Callable:
                 # ── agent_end event ───────────────────────────────────────────
                 _push_event(request_id, "agent_end", {
                     **span,
+                    "memory_context_tokens": state.get("memory_context_tokens", 0),
                     # Also include tool_calls if research agent produced any
                     "tool_calls": result.get("tool_calls", []),
                 })

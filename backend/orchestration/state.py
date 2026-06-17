@@ -7,6 +7,9 @@ Added tool_calls to capture web_search invocations for the UI.
 """
 from typing import TypedDict, Annotated, List, Optional
 import operator
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict):
@@ -59,6 +62,8 @@ def initial_state(query: str, session_id: str = "default") -> AgentState:
     
     # Estimate tokens (~4 characters per token)
     memory_context_tokens = len(memory_context) // 4 if memory_context else 0
+
+    logger.info("initial_state: memory_context_tokens=%d context_len=%d", memory_context_tokens, len(memory_context))
 
     return AgentState(
         query=query,

@@ -158,6 +158,7 @@ export default function App() {
   const [timeline, setTimeline] = useState([]);     // raw SSE events for timeline
   const [liveAgent, setLiveAgent] = useState(null); // currently active agent
   const [memory, setMemory]     = useState(null);
+  const [memoryContextTokens, setMemoryContextTokens] = useState(0);
   const esRef = useRef(null);
 
   // Load memory on mount
@@ -175,6 +176,7 @@ export default function App() {
     setResult(null);
     setTimeline([]);
     setLiveAgent(null);
+    setMemoryContextTokens(0);
 
     const sessionId = `mars-lite-${Date.now()}`;
     const url = `${API_BASE}/run/stream?query=${encodeURIComponent(query)}&session_id=${sessionId}`;
@@ -188,11 +190,17 @@ export default function App() {
     es.addEventListener('agent_start', (e) => {
       const data = JSON.parse(e.data);
       setLiveAgent(data.agent);
+      if (data.memory_context_tokens !== undefined) {
+        setMemoryContextTokens(data.memory_context_tokens);
+      }
       setTimeline(prev => [...prev, { type: 'agent_start', ...data }]);
     });
 
     es.addEventListener('agent_end', (e) => {
       const data = JSON.parse(e.data);
+      if (data.memory_context_tokens !== undefined) {
+        setMemoryContextTokens(data.memory_context_tokens);
+      }
       setTimeline(prev => [...prev, { type: 'agent_end', ...data }]);
     });
 
@@ -200,6 +208,9 @@ export default function App() {
       const data = JSON.parse(e.data);
       setResult(data);
       setMemory(data.memory);
+      if (data.memory_context_tokens !== undefined) {
+        setMemoryContextTokens(data.memory_context_tokens);
+      }
       setLiveAgent(null);
       setLoading(false);
       es.close();
@@ -226,8 +237,8 @@ export default function App() {
   // Derived data
   const agentEndEvents = timeline.filter(e => e.type === 'agent_end');
   const totalDuration  = agentEndEvents.reduce((s, e) => s + (e.duration_ms || 0), 0);
-  const totalTokens    = agentEndEvents.reduce((s, e) => s + (e.total_tokens || 0), 0) + (result?.memory_context_tokens || 0);
-  const maxTokens      = Math.max(...agentEndEvents.map(e => e.total_tokens || 0), result?.memory_context_tokens || 0, 1);
+  const totalTokens    = agentEndEvents.reduce((s, e) => s + (e.total_tokens || 0), 0) + memoryContextTokens;
+  const maxTokens      = Math.max(...agentEndEvents.map(e => e.total_tokens || 0), memoryContextTokens, 1);
 
   // Context handoff from result
   const contextHandoffs = result ? [
@@ -368,14 +379,14 @@ export default function App() {
               ? <div className="empty-hint"><Info size={13}/> Token counts appear after execution</div>
               : <>
                   <div className="token-section">
-                    {result?.memory_context_tokens > 0 && (
+                    {memoryContextTokens > 0 && (
                       <div className="token-agent-block" style={{ borderLeft: '2px solid #ec4899', paddingLeft: '8px', marginBottom: '12px' }}>
                         <div className="token-agent-name" style={{ color: '#ec4899' }}>
                           <MemoryStick size={12}/> Context Memory
                           <span className="token-model">local-cache</span>
                         </div>
-                        <TokenBar label="In"    value={result.memory_context_tokens}    max={maxTokens} color="#ec4899" />
-                        <TokenBar label="Total" value={result.memory_context_tokens} max={maxTokens} color="#ec4899" />
+                        <TokenBar label="In"    value={memoryContextTokens}    max={maxTokens} color="#ec4899" />
+                        <TokenBar label="Total" value={memoryContextTokens} max={maxTokens} color="#ec4899" />
                       </div>
                     )}
                     {agentEndEvents.map((e, i) => {
