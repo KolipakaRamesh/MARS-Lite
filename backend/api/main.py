@@ -116,14 +116,7 @@ async def _run_pipeline(session_id: str, query: str) -> dict:
         raise RuntimeError("Graph not initialized")
 
     state = initial_state(query, session_id)
-    final_state = dict(state)
-
-    async for output in _graph.astream(state):
-        for node_name, node_output in output.items():
-            logger.info("[Graph] Node completed: %s", node_name)
-            final_state = {**final_state, **node_output}
-
-    return final_state
+    return await _graph.ainvoke(state)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
