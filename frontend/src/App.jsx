@@ -1,473 +1,496 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { useQuery, useMutation } from "convex/react";
-import { api } from "@convex/_generated/api";
-import { 
-  Search, 
-  Cpu, 
-  Activity, 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle,
-  Database,
-  History,
-  Layers,
-  ShieldCheck,
-  Zap,
-  BarChart2,
-  Bot,
-  Radar,
-  Trash2
+import {
+  Search, Cpu, Activity, CheckCircle2, Clock, AlertCircle,
+  Database, Layers, Zap, BarChart2, Bot, Globe, Brain,
+  FlaskConical, MemoryStick, ListChecks, ChevronDown, ChevronRight,
+  Timer, TrendingUp, Terminal, Info
 } from 'lucide-react';
 import './App.css';
 
 const API_BASE = 'http://localhost:8000';
 
-// Agent color map
+// ── Agent colour palette ──────────────────────────────────────────────────────
 const AGENT_COLORS = {
-  planner:  { color: '#a78bfa', bg: 'rgba(167,139,250,0.1)', border: 'rgba(167,139,250,0.25)' },
-  research: { color: '#38bdf8', bg: 'rgba(56,189,248,0.1)',  border: 'rgba(56,189,248,0.25)' },
-  analyst:  { color: '#4ade80', bg: 'rgba(74,222,128,0.1)',  border: 'rgba(74,222,128,0.25)' },
-  reviewer: { color: '#fb923c', bg: 'rgba(251,146,60,0.1)',  border: 'rgba(251,146,60,0.25)' },
+  planner:  { color: '#a78bfa', bg: 'rgba(167,139,250,0.08)', border: 'rgba(167,139,250,0.3)', glow: '0 0 12px rgba(167,139,250,0.25)' },
+  research: { color: '#38bdf8', bg: 'rgba(56,189,248,0.08)',  border: 'rgba(56,189,248,0.3)',  glow: '0 0 12px rgba(56,189,248,0.25)' },
+  analyst:  { color: '#4ade80', bg: 'rgba(74,222,128,0.08)',  border: 'rgba(74,222,128,0.3)',  glow: '0 0 12px rgba(74,222,128,0.25)' },
 };
+const DEFAULT_COLOR = { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', border: 'rgba(148,163,184,0.2)', glow: 'none' };
 
-function AgentUsageCard({ usage }) {
-  const meta = AGENT_COLORS[usage.agent] || { color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.2)' };
-  const modelShort = usage.model ? usage.model.split('/').pop() : '—';
+const PIPELINE = [
+  { key: 'planner',  label: 'Planner',  icon: Brain,       desc: 'Decomposes query into subtasks' },
+  { key: 'research', label: 'Research', icon: Globe,        desc: 'Executes subtasks via web search' },
+  { key: 'analyst',  label: 'Analyst',  icon: FlaskConical, desc: 'Synthesizes findings into answer' },
+];
 
+// ── Utility helpers ───────────────────────────────────────────────────────────
+const fmt_ms  = (ms)  => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+const fmt_tok = (n)   => n >= 1000 ? `${(n / 1000).toFixed(1)}k`  : (n || 0).toString();
+const ts_hms  = (iso) => iso ? new Date(iso).toLocaleTimeString() : '—';
+
+// ── Collapsible card ──────────────────────────────────────────────────────────
+function Panel({ icon: Icon, title, badge, children, defaultOpen = true, accent }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="agent-usage-card" style={{ borderColor: meta.border, background: meta.bg }}>
-      <div className="agent-usage-header">
-        <Bot size={14} style={{ color: meta.color, flexShrink: 0 }} />
-        <span className="agent-usage-name" style={{ color: meta.color }}>
-          {usage.agent}
-        </span>
-      </div>
-      <div className="agent-usage-model" title={usage.model}>{modelShort}</div>
-      <div className="agent-usage-stats">
-        <div className="usage-stat">
-          <span className="usage-stat-label">In</span>
-          <span className="usage-stat-value">{(usage.prompt_tokens || 0).toLocaleString()}</span>
+    <div className="panel" style={{ '--accent': accent || 'var(--accent-blue)' }}>
+      <button className="panel-header" onClick={() => setOpen(o => !o)}>
+        <div className="panel-title-row">
+          <Icon size={15} className="panel-icon" />
+          <span className="panel-title">{title}</span>
+          {badge != null && <span className="panel-badge">{badge}</span>}
         </div>
-        <div className="usage-stat">
-          <span className="usage-stat-label">Out</span>
-          <span className="usage-stat-value">{(usage.completion_tokens || 0).toLocaleString()}</span>
-        </div>
-        <div className="usage-stat">
-          <span className="usage-stat-label">ms</span>
-          <span className="usage-stat-value">{Math.round(usage.latency_ms || 0).toLocaleString()}</span>
-        </div>
+        {open ? <ChevronDown size={14} className="panel-chevron" /> : <ChevronRight size={14} className="panel-chevron" />}
+      </button>
+      {open && <div className="panel-body">{children}</div>}
+    </div>
+  );
+}
+
+// ── Timeline event row ────────────────────────────────────────────────────────
+function TimelineEvent({ agent, event, timestamp, durationMs, tokensIn, tokensOut }) {
+  const meta = AGENT_COLORS[agent] || DEFAULT_COLOR;
+  const isEnd = event === 'agent_end';
+  return (
+    <div className="timeline-row">
+      <div className="timeline-dot" style={{ background: meta.color, boxShadow: meta.glow }} />
+      <div className="timeline-line" />
+      <div className="timeline-content">
+        <span className="timeline-agent" style={{ color: meta.color }}>{agent}</span>
+        <span className="timeline-event">{isEnd ? 'Completed' : 'Started'}</span>
+        {isEnd && durationMs != null && (
+          <span className="timeline-meta">{fmt_ms(durationMs)}</span>
+        )}
+        {isEnd && tokensIn != null && (
+          <span className="timeline-meta">↑{fmt_tok(tokensIn)} ↓{fmt_tok(tokensOut)}</span>
+        )}
+        <span className="timeline-time">{ts_hms(timestamp)}</span>
       </div>
     </div>
   );
 }
 
-function LiveStatusIndicator({ status, sessionId }) {
-  if (!sessionId || !status) return null;
-
-  const isActive = status.agent !== 'done' && status.agent !== 'error';
-  const meta = AGENT_COLORS[status.agent] || { color: 'var(--accent-blue)' };
-
+// ── Context handoff card ──────────────────────────────────────────────────────
+function ContextCard({ agent, input, output }) {
+  const meta  = AGENT_COLORS[agent] || DEFAULT_COLOR;
+  const [showOutput, setShowOutput] = useState(false);
   return (
-    <div className={`live-status-bar fade-in ${isActive ? 'active' : ''}`}>
-      <div className="live-status-indicator">
-        {isActive ? <Radar size={16} className="pulse" style={{ color: meta.color }} /> : <CheckCircle2 size={16} className="text-green" />}
-        <span className="live-status-text">
-          {status.status}
-        </span>
+    <div className="context-card" style={{ borderColor: meta.border, background: meta.bg }}>
+      <div className="context-agent" style={{ color: meta.color }}>
+        <Bot size={13} /> {agent}
       </div>
-      {status.subtask_index !== undefined && isActive && (
-         <div className="live-status-subtask">
-            Subtask {status.subtask_index + 1}
-         </div>
+      <div className="context-section">
+        <span className="context-label">Input</span>
+        <div className="context-text">{input}</div>
+      </div>
+      {output && (
+        <div className="context-section">
+          <button className="context-toggle" onClick={() => setShowOutput(o => !o)}>
+            <span className="context-label">Output</span>
+            {showOutput ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+          {showOutput && <div className="context-text context-output">{output}</div>}
+        </div>
       )}
     </div>
   );
 }
 
-// Agent pipeline definition — order matters
-const PIPELINE = [
-  { key: 'planner',  label: 'Planner Agent',  desc: 'Decomposes query into subtasks',      color: '#a78bfa' },
-  { key: 'research', label: 'Research Agent', desc: 'Executes each subtask via ReAct loop', color: '#38bdf8' },
-  { key: 'analyst',  label: 'Analyst Agent',  desc: 'Synthesizes findings into an answer',  color: '#4ade80' },
-  { key: 'reviewer', label: 'Reviewer Agent', desc: 'Quality-gates the final answer',       color: '#fb923c' },
-];
-
-const PIPELINE_ORDER = PIPELINE.map(p => p.key);
-
-function getStageStatus(stageKey, activeAgent, result, loading) {
-  if (!loading && !result) return 'idle';
-  if (result) return 'done';
-  const activeIdx = PIPELINE_ORDER.indexOf(activeAgent);
-  const stageIdx  = PIPELINE_ORDER.indexOf(stageKey);
-  if (activeIdx === -1) return 'pending';
-  if (stageIdx < activeIdx)  return 'done';
-  if (stageIdx === activeIdx) return 'active';
-  return 'pending';
-}
-
-function App() {
-  const [query, setQuery] = useState('');
-  const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [deletingId, setDeletingId] = useState(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-
-  // Convex Hooks
-  const history = useQuery(api.sessions.getRecentSessions, { limit: 15 }) || [];
-  const deleteSession = useMutation(api.sessions.remove);
-  
-  // Real-time agent heartbeat from Convex (lifted here so sidebar can use it too)
-  const heartbeatStatus = useQuery(api.heartbeats.getStatus, currentSessionId ? { session_id: currentSessionId } : 'skip');
-
-  const handleSearch = async (e) => {
-    e?.preventDefault();
-    if (!query.trim() || loading) return;
-
-    const sessionId = `mars-${Date.now()}`;
-    setCurrentSessionId(sessionId);
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const resp = await fetch(`${API_BASE}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-           query, 
-           session_id: sessionId,
-           max_iterations: 3 
-        }),
-      });
-
-      if (!resp.ok) {
-        throw new Error(`API Error: ${resp.statusText}`);
-      }
-
-      const data = await resp.json();
-      setResult(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSession = (session) => {
-    setResult({
-      query: session.query,
-      answer: session.synthesized_answer || "Session data incomplete",
-      quality_score: session.quality_score,
-      verdict: session.verdict,
-      subtasks: session.subtasks || [],
-      iteration_count: session.iteration_count || 1,
-      llm_usage: [],   
-    });
-    setQuery(session.query);
-    setCurrentSessionId(session.session_id);
-  };
-
-  const handleDeleteSession = async (e, id, sessionId) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    // Custom confirmation logic
-    if (confirmDeleteId !== id) {
-      setConfirmDeleteId(id);
-      // Reset confirmation after 3 seconds if not clicked again
-      setTimeout(() => setConfirmDeleteId(prev => prev === id ? null : prev), 3000);
-      return;
-    }
-
-    try {
-      setDeletingId(id);
-      setConfirmDeleteId(null);
-      await deleteSession({ session_id: sessionId });
-      
-      if (currentSessionId === sessionId) {
-        setResult(null);
-        setQuery('');
-        setCurrentSessionId(null);
-      }
-    } catch (err) {
-      console.error("Failed to delete session:", err);
-      alert("Failed to delete session: " + err.message);
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  // Aggregate totals across all llm_usage entries
-  const usageTotals = result?.llm_usage?.length
-    ? result.llm_usage.reduce(
-        (acc, u) => ({
-          total_tokens: acc.total_tokens + (u.total_tokens || 0),
-          latency_ms:   acc.latency_ms   + (u.latency_ms   || 0),
-        }),
-        { total_tokens: 0, latency_ms: 0 }
-      )
-    : null;
-
+// ── Tool call card ────────────────────────────────────────────────────────────
+function ToolCallCard({ call, index }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="header">
-        <div className="logo-area">
-          <Cpu className="logo-icon" size={32} />
-          <span className="logo-text">MARS</span>
+    <div className="tool-card">
+      <div className="tool-header" onClick={() => setOpen(o => !o)}>
+        <div className="tool-name-row">
+          <Terminal size={13} style={{ color: '#38bdf8' }} />
+          <span className="tool-name">{call.tool}</span>
+          <span className="tool-index">#{index + 1}</span>
         </div>
-        <div className="header-status">
-          <ShieldCheck size={20} className={result ? "text-green" : "text-dim"} />
+        <div className="tool-meta-row">
+          <span className="tool-duration">{fmt_ms(call.duration_ms)}</span>
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </div>
-      </header>
-
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-section">
-          <div className="sidebar-title">
-            <History size={14} style={{ marginRight: '8px' }} />
-            Recent Sessions (Live)
-          </div>
-          <div className="history-list">
-            {history.length > 0 ? history.map((s, i) => (
-              <div 
-                key={s._id || i} 
-                className={`history-item ${currentSessionId === s.session_id ? 'active' : ''}`} 
-                onClick={() => loadSession(s)}
-                title={s.query}
-              >
-                <span className="history-query">{s.query}</span>
-                <button 
-                  className={`delete-session-btn ${confirmDeleteId === s._id ? 'confirming' : ''}`} 
-                  disabled={deletingId === s._id}
-                  onClick={(e) => handleDeleteSession(e, s._id, s.session_id)}
-                  title={confirmDeleteId === s._id ? "Click again to confirm" : "Delete session"}
-                >
-                  {deletingId === s._id ? (
-                    <div className="btn-spinner" />
-                  ) : confirmDeleteId === s._id ? (
-                    <span className="confirm-text">Sure?</span>
-                  ) : (
-                    <Trash2 size={12} />
-                  )}
-                </button>
-              </div>
-            )) : (
-              <div className="history-item empty">No history yet</div>
-            )}
-          </div>
+      </div>
+      <div className="tool-query">{call.input}</div>
+      {open && (
+        <div className="tool-output">
+          <span className="context-label">Output</span>
+          <div className="context-text">{call.output}</div>
         </div>
-
-        <div className="sidebar-section">
-          <div className="sidebar-title">
-            <Layers size={14} style={{ marginRight: '8px' }} />
-            Agent Pipeline
-          </div>
-
-          {!loading && !result ? (
-            <div className="subtask-item empty">Run a query to see the pipeline</div>
-          ) : (
-            <div className="pipeline-list">
-              {PIPELINE.map((stage, si) => {
-                const status = getStageStatus(stage.key, heartbeatStatus?.agent, result, loading);
-                const isActive = status === 'active';
-                const isDone   = status === 'done';
-
-                return (
-                  <div
-                    key={stage.key}
-                    className={`pipeline-stage pipeline-stage--${status}`}
-                    style={{ '--stage-color': stage.color }}
-                  >
-                    {/* Stage header: agent name + badge */}
-                    <div className="pipeline-stage-header">
-                      <div className="pipeline-agent-dot" />
-                      <div className="pipeline-agent-info">
-                        <span className="pipeline-agent-name">{stage.label}</span>
-                        <span className="pipeline-agent-desc">{stage.desc}</span>
-                      </div>
-                      <div className={`pipeline-status-badge pipeline-badge--${status}`}>
-                        {isDone   && <CheckCircle2 size={12} />}
-                        {isActive && <Activity size={12} className="pulse" />}
-                        {!isDone && !isActive && <Clock size={12} />}
-                        <span>{isDone ? 'Done' : isActive ? 'Active' : 'Pending'}</span>
-                      </div>
-                    </div>
-
-                    {/* Subtasks nested under Research Agent */}
-                    {stage.key === 'research' && (
-                      <div className="pipeline-subtasks">
-                        {(() => {
-                          // Prefer live subtasks from heartbeat; fall back to final result
-                          const liveTasks = heartbeatStatus?.subtasks || result?.subtasks;
-                          const activeIdx = heartbeatStatus?.subtask_index;
-
-                          if (liveTasks?.length) {
-                            return liveTasks.map((task, i) => {
-                              // Determine per-subtask status when research is running
-                              let taskStatus = 'done';
-                              if (loading && activeIdx !== undefined) {
-                                if (i < activeIdx)      taskStatus = 'done';
-                                else if (i === activeIdx) taskStatus = 'active';
-                                else                    taskStatus = 'pending';
-                              }
-                              return (
-                                <div key={i} className={`pipeline-subtask-item pipeline-subtask--${taskStatus}`}>
-                                  {taskStatus === 'done'    && <CheckCircle2 size={12} style={{ color: stage.color, flexShrink: 0 }} />}
-                                  {taskStatus === 'active'  && <Activity size={12} className="pulse" style={{ color: stage.color, flexShrink: 0 }} />}
-                                  {taskStatus === 'pending' && <Clock size={12} style={{ flexShrink: 0, opacity: 0.4 }} />}
-                                  <span>{task}</span>
-                                </div>
-                              );
-                            });
-                          }
-
-                          // Planner not yet done — show spinner
-                          if (loading) {
-                            return (
-                              <div className="pipeline-subtask-item pipeline-subtask--pending">
-                                <Clock size={12} style={{ flexShrink: 0, opacity: 0.4 }} />
-                                <span style={{ opacity: 0.4 }}>Waiting for planner…</span>
-                              </div>
-                            );
-                          }
-
-                          return null;
-                        })()}
-
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="main-content">
-        {/* Search Bar */}
-        <div className="search-container fade-in">
-          <form onSubmit={handleSearch} className="search-input-wrapper">
-            <Search className="text-secondary" size={24} />
-            <input 
-              type="text" 
-              className="search-input" 
-              placeholder="What would you like to research today?" 
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              disabled={loading}
-            />
-            <button type="submit" className="search-button" disabled={loading || !query.trim()}>
-              {loading ? 'Analyzing...' : 'Execute'}
-            </button>
-          </form>
-        </div>
-
-        {/* Live Status Bar (Convex powered) */}
-        <LiveStatusIndicator status={heartbeatStatus} sessionId={currentSessionId} />
-
-        {/* Error Handling */}
-        {error && (
-          <div className="metric-card verdict-escalate fade-in" style={{ borderColor: '#f87171' }}>
-            <div className="metric-label" style={{ color: '#f87171' }}>Error Encountered</div>
-            <div className="text-primary">{error}</div>
-          </div>
-        )}
-
-        {/* Results Area */}
-        {result && (
-          <>
-            {/* Quality Metrics */}
-            <div className="metrics-row fade-in">
-              <div className="metric-card">
-                <div className="metric-label">Quality Score</div>
-                <div className="metric-value">{(result.quality_score * 100).toFixed(0)}%</div>
-                <div className="progress-bar-bg" style={{ height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px' }}>
-                  <div className="progress-bar-fill" style={{ 
-                    height: '100%', 
-                    width: `${result.quality_score * 100}%`,
-                    background: 'var(--accent-blue)',
-                    borderRadius: '2px'
-                  }}></div>
-                </div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">Review Verdict</div>
-                <div className="metric-value">
-                  <span className={`verdict-tag verdict-${result.verdict?.toLowerCase()}`}>
-                    {result.verdict}
-                  </span>
-                </div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">Iterations</div>
-                <div className="metric-value">{result.iteration_count}</div>
-              </div>
-              {usageTotals && (
-                <>
-                  <div className="metric-card">
-                    <div className="metric-label"><Zap size={11} style={{display:'inline',marginRight:4}}/>Total Tokens</div>
-                    <div className="metric-value">{usageTotals.total_tokens.toLocaleString()}</div>
-                  </div>
-                  <div className="metric-card">
-                    <div className="metric-label"><Clock size={11} style={{display:'inline',marginRight:4}}/>Total Latency</div>
-                    <div className="metric-value">{(usageTotals.latency_ms / 1000).toFixed(1)}s</div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Live Agent Usage Breakdown */}
-            {result.llm_usage?.length > 0 && (
-              <div className="fade-in">
-                <div className="section-title">
-                  <BarChart2 size={14} style={{ marginRight: '8px' }} />
-                  Agent Metrics Breakdown
-                </div>
-                <div className="agent-usage-grid">
-                  {result.llm_usage.map((u, i) => (
-                    <AgentUsageCard key={i} usage={u} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Markdown Answer */}
-            <div className="results-card fade-in">
-              <div className="markdown-content">
-                <ReactMarkdown>{result.answer}</ReactMarkdown>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Empty State */}
-        {!result && !loading && !error && (
-          <div className="empty-state fade-in" style={{ textAlign: 'center', marginTop: '4rem', opacity: 0.5 }}>
-            <Database size={64} style={{ marginBottom: '1rem', color: 'var(--accent-blue)' }} />
-            <h2 className="text-primary">Multi-Agent Research System</h2>
-            <p className="text-secondary">Ready to synthesize information from across the web</p>
-          </div>
-        )}
-
-        {/* Loading State */}
-        {loading && !result && (
-          <div className="loading-state fade-in" style={{ textAlign: 'center', marginTop: '4rem' }}>
-            <div className="pulse" style={{ marginBottom: '1.5rem' }}>
-              <Cpu size={64} style={{ color: 'var(--accent-blue)' }} />
-            </div>
-            <h2 className="text-primary">Agents are working...</h2>
-            <p className="text-secondary">This may take a minute as researchers gather facts</p>
-          </div>
-        )}
-      </main>
+      )}
     </div>
   );
 }
 
-export default App;
+// ── Token bar ─────────────────────────────────────────────────────────────────
+function TokenBar({ label, value, max, color }) {
+  const pct = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div className="token-bar-row">
+      <span className="token-bar-label">{label}</span>
+      <div className="token-bar-track">
+        <div className="token-bar-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="token-bar-value">{fmt_tok(value)}</span>
+    </div>
+  );
+}
+
+// ── Eval criterion ────────────────────────────────────────────────────────────
+function EvalCriterion({ label, passed }) {
+  return (
+    <div className={`eval-criterion ${passed ? 'eval-pass' : 'eval-fail'}`}>
+      {passed
+        ? <CheckCircle2 size={14} style={{ color: '#4ade80' }} />
+        : <AlertCircle  size={14} style={{ color: '#f87171' }} />}
+      <span>{label}</span>
+    </div>
+  );
+}
+
+// ── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [query, setQuery]       = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [result, setResult]     = useState(null);
+  const [error, setError]       = useState(null);
+  const [timeline, setTimeline] = useState([]);     // raw SSE events for timeline
+  const [liveAgent, setLiveAgent] = useState(null); // currently active agent
+  const [memory, setMemory]     = useState(null);
+  const esRef = useRef(null);
+
+  // Load memory on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/memory`).then(r => r.json()).then(setMemory).catch(() => {});
+  }, []);
+
+  const handleSearch = useCallback(async (e) => {
+    e?.preventDefault();
+    if (!query.trim() || loading) return;
+
+    // Reset state
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setTimeline([]);
+    setLiveAgent(null);
+
+    const sessionId = `mars-lite-${Date.now()}`;
+    const url = `${API_BASE}/run/stream?query=${encodeURIComponent(query)}&session_id=${sessionId}`;
+
+    // Close previous EventSource if any
+    if (esRef.current) esRef.current.close();
+
+    const es = new EventSource(url);
+    esRef.current = es;
+
+    es.addEventListener('agent_start', (e) => {
+      const data = JSON.parse(e.data);
+      setLiveAgent(data.agent);
+      setTimeline(prev => [...prev, { type: 'agent_start', ...data }]);
+    });
+
+    es.addEventListener('agent_end', (e) => {
+      const data = JSON.parse(e.data);
+      setTimeline(prev => [...prev, { type: 'agent_end', ...data }]);
+    });
+
+    es.addEventListener('result', (e) => {
+      const data = JSON.parse(e.data);
+      setResult(data);
+      setMemory(data.memory);
+      setLiveAgent(null);
+      setLoading(false);
+      es.close();
+    });
+
+    es.addEventListener('error', (e) => {
+      let msg = 'Pipeline error';
+      try { msg = JSON.parse(e.data).detail; } catch (_) {}
+      setError(msg);
+      setLiveAgent(null);
+      setLoading(false);
+      es.close();
+    });
+
+    es.onerror = () => {
+      if (loading) {
+        setError('Connection lost. Is the backend running?');
+        setLoading(false);
+      }
+      es.close();
+    };
+  }, [query, loading]);
+
+  // Derived data
+  const agentEndEvents = timeline.filter(e => e.type === 'agent_end');
+  const totalDuration  = agentEndEvents.reduce((s, e) => s + (e.duration_ms || 0), 0);
+  const totalTokens    = agentEndEvents.reduce((s, e) => s + (e.total_tokens || 0), 0);
+  const maxTokens      = Math.max(...agentEndEvents.map(e => e.total_tokens || 0), 1);
+
+  // Context handoff from result
+  const contextHandoffs = result ? [
+    { agent: 'planner',  input: result.query,    output: result.subtasks?.join('\n') },
+    { agent: 'research', input: result.subtasks?.join(' | '), output: result.tool_calls?.length ? `${result.tool_calls.length} web search(es) executed` : 'No tool calls recorded' },
+    { agent: 'analyst',  input: 'Research notes from all subtasks', output: result.answer?.slice(0, 300) + (result.answer?.length > 300 ? '…' : '') },
+  ] : [];
+
+  return (
+    <div className="app">
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <header className="app-header">
+        <div className="header-brand">
+          <Cpu size={28} className="brand-icon" />
+          <div>
+            <span className="brand-title">MARS-Lite</span>
+            <span className="brand-subtitle">Multi-Agent Research System</span>
+          </div>
+        </div>
+        <div className="header-status">
+          {loading
+            ? <><Activity size={14} className="pulse" style={{color:'#38bdf8'}}/> <span style={{color:'#38bdf8',fontSize:'12px'}}>{liveAgent ? `${liveAgent} running…` : 'Starting…'}</span></>
+            : result
+            ? <><CheckCircle2 size={14} style={{color:'#4ade80'}}/> <span style={{color:'#4ade80',fontSize:'12px'}}>Complete</span></>
+            : <><div className="status-dot idle"/> <span style={{fontSize:'12px',color:'var(--text-dim)'}}>Idle</span></>
+          }
+        </div>
+      </header>
+
+      {/* ── Search Bar ──────────────────────────────────────────────────── */}
+      <div className="search-section">
+        <form className="search-form" onSubmit={handleSearch}>
+          <Search size={20} className="search-icon" />
+          <input
+            id="query-input"
+            type="text"
+            className="search-input"
+            placeholder="Ask anything… e.g. What is RAG in AI?"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            disabled={loading}
+          />
+          <button id="execute-btn" type="submit" className="search-btn" disabled={loading || !query.trim()}>
+            {loading ? <><Activity size={14} className="pulse" /> Analyzing</> : <><Zap size={14} /> Execute</>}
+          </button>
+        </form>
+
+        {/* Agent pipeline indicators */}
+        <div className="pipeline-bar">
+          {PIPELINE.map((stage, i) => {
+            const isDone   = agentEndEvents.some(e => e.agent_name === stage.key);
+            const isActive = liveAgent === stage.key;
+            const meta     = AGENT_COLORS[stage.key];
+            return (
+              <React.Fragment key={stage.key}>
+                <div className={`pipe-stage ${isDone ? 'done' : isActive ? 'active' : 'idle'}`}
+                     style={{ '--c': meta.color }}>
+                  <stage.icon size={13} />
+                  <span>{stage.label}</span>
+                  {isActive && <Activity size={11} className="pulse" />}
+                  {isDone    && <CheckCircle2 size={11} />}
+                </div>
+                {i < PIPELINE.length - 1 && (
+                  <div className={`pipe-arrow ${isDone ? 'done' : ''}`}>→</div>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Error ───────────────────────────────────────────────────────── */}
+      {error && (
+        <div className="error-bar">
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
+
+      {/* ── Main grid ───────────────────────────────────────────────────── */}
+      <div className="dashboard-grid">
+
+        {/* ── Left column ─────────────────────────────────────────────── */}
+        <div className="col-left">
+
+          {/* 1. Timeline */}
+          <Panel icon={Clock} title="Timeline" badge={timeline.length} accent="#a78bfa">
+            {timeline.length === 0
+              ? <div className="empty-hint"><Info size={13}/> Run a query to see events</div>
+              : <div className="timeline">
+                  {timeline.map((evt, i) => (
+                    <TimelineEvent
+                      key={i}
+                      agent={evt.agent || evt.agent_name}
+                      event={evt.type}
+                      timestamp={evt.timestamp || evt.start_time}
+                      durationMs={evt.duration_ms}
+                      tokensIn={evt.tokens_in}
+                      tokensOut={evt.tokens_out}
+                    />
+                  ))}
+                  {loading && liveAgent && (
+                    <div className="timeline-row timeline-live">
+                      <div className="timeline-dot pulse" style={{ background: AGENT_COLORS[liveAgent]?.color }} />
+                      <div className="timeline-content">
+                        <span className="timeline-agent" style={{ color: AGENT_COLORS[liveAgent]?.color }}>{liveAgent}</span>
+                        <span className="timeline-event">running…</span>
+                        <Activity size={12} className="pulse" style={{color:'#38bdf8'}}/>
+                      </div>
+                    </div>
+                  )}
+                </div>
+            }
+          </Panel>
+
+          {/* 2. Context Handoff */}
+          <Panel icon={Layers} title="Context Handoff" badge={contextHandoffs.filter(c=>c.output).length} accent="#38bdf8">
+            {contextHandoffs.length === 0
+              ? <div className="empty-hint"><Info size={13}/> Handoffs appear after execution</div>
+              : contextHandoffs.map((c, i) => <ContextCard key={i} {...c} />)
+            }
+          </Panel>
+
+          {/* 3. Tool Calls */}
+          <Panel icon={Terminal} title="Tool Calls" badge={result?.tool_calls?.length ?? 0} accent="#fb923c">
+            {!result?.tool_calls?.length
+              ? <div className="empty-hint"><Info size={13}/> web_search calls appear here</div>
+              : result.tool_calls.map((c, i) => <ToolCallCard key={i} call={c} index={i} />)
+            }
+          </Panel>
+        </div>
+
+        {/* ── Right column ────────────────────────────────────────────── */}
+        <div className="col-right">
+
+          {/* 4. Token Metrics */}
+          <Panel icon={BarChart2} title="Token Metrics" badge={totalTokens ? fmt_tok(totalTokens) : null} accent="#4ade80">
+            {agentEndEvents.length === 0
+              ? <div className="empty-hint"><Info size={13}/> Token counts appear after execution</div>
+              : <>
+                  <div className="token-section">
+                    {agentEndEvents.map((e, i) => {
+                      const meta = AGENT_COLORS[e.agent_name] || DEFAULT_COLOR;
+                      return (
+                        <div key={i} className="token-agent-block">
+                          <div className="token-agent-name" style={{ color: meta.color }}>
+                            <Bot size={12}/> {e.agent_name}
+                            <span className="token-model">{e.model?.split('/').pop()}</span>
+                          </div>
+                          <TokenBar label="In"    value={e.tokens_in}    max={maxTokens} color={meta.color} />
+                          <TokenBar label="Out"   value={e.tokens_out}   max={maxTokens} color={meta.color} />
+                          <TokenBar label="Total" value={e.total_tokens} max={maxTokens} color={meta.color} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="token-total">
+                    <Zap size={12}/> Total: <strong>{fmt_tok(totalTokens)}</strong> tokens
+                  </div>
+                </>
+            }
+          </Panel>
+
+          {/* 5. Latency Metrics */}
+          <Panel icon={Timer} title="Latency" badge={totalDuration ? fmt_ms(totalDuration) : null} accent="#f59e0b">
+            {agentEndEvents.length === 0
+              ? <div className="empty-hint"><Info size={13}/> Latency data appears after execution</div>
+              : <>
+                  {agentEndEvents.map((e, i) => {
+                    const meta = AGENT_COLORS[e.agent_name] || DEFAULT_COLOR;
+                    const pct  = totalDuration > 0 ? (e.duration_ms / totalDuration) * 100 : 0;
+                    return (
+                      <div key={i} className="latency-row">
+                        <span className="latency-agent" style={{ color: meta.color }}>{e.agent_name}</span>
+                        <div className="latency-bar-track">
+                          <div className="latency-bar-fill" style={{ width: `${pct}%`, background: meta.color }} />
+                        </div>
+                        <span className="latency-value">{fmt_ms(e.duration_ms)}</span>
+                      </div>
+                    );
+                  })}
+                  <div className="latency-total">
+                    <TrendingUp size={12}/> Total: <strong>{fmt_ms(totalDuration)}</strong>
+                  </div>
+                </>
+            }
+          </Panel>
+
+          {/* 6. Memory Panel */}
+          <Panel icon={MemoryStick} title="Memory" accent="#ec4899">
+            {!memory?.last_query
+              ? <div className="empty-hint"><Info size={13}/> Memory stores the last query context</div>
+              : <div className="memory-grid">
+                  <div className="mem-item"><span className="mem-label">Last Query</span><span className="mem-value">{memory.last_query}</span></div>
+                  <div className="mem-item"><span className="mem-label">Category</span><span className="mem-value mem-tag">{memory.last_category}</span></div>
+                  {memory.last_budget && <div className="mem-item"><span className="mem-label">Budget</span><span className="mem-value">{memory.last_budget}</span></div>}
+                  <div className="mem-item"><span className="mem-label">Stored At</span><span className="mem-value">{ts_hms(memory.timestamp)}</span></div>
+                  {memory.history?.length > 0 && (
+                    <div className="mem-history">
+                      <span className="mem-label">History ({memory.history.length})</span>
+                      {memory.history.slice(0, 5).map((h, i) => (
+                        <div key={i} className="mem-history-item">
+                          <span className="mem-hist-cat">{h.last_category}</span>
+                          <span className="mem-hist-q">{h.last_query?.slice(0, 50)}{h.last_query?.length > 50 ? '…' : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+            }
+          </Panel>
+
+          {/* 7. Evaluation Panel */}
+          <Panel icon={ListChecks} title="Evaluation" badge={result?.evaluation ? `${result.evaluation.score}/100` : null} accent="#a78bfa">
+            {!result?.evaluation
+              ? <div className="empty-hint"><Info size={13}/> Evaluation runs after completion</div>
+              : <>
+                  <div className="eval-score-ring" style={{ '--score': result.evaluation.score }}>
+                    <div className="eval-score-num">{result.evaluation.score}</div>
+                    <div className="eval-score-label">/ 100</div>
+                  </div>
+                  <div className="eval-criteria">
+                    <EvalCriterion label="Workflow Completed" passed={result.evaluation.workflow_completed} />
+                    <EvalCriterion label="Tool Called"        passed={result.evaluation.tool_called} />
+                    <EvalCriterion label="Task Completed"     passed={result.evaluation.task_completed} />
+                  </div>
+                  {result.evaluation.details && (
+                    <div className="eval-details">
+                      <span className="mem-label">Details</span>
+                      <div className="eval-detail-row"><span>Agents seen</span><span>{result.evaluation.details.agents_seen?.join(', ')}</span></div>
+                      <div className="eval-detail-row"><span>Tool calls</span><span>{result.evaluation.details.tool_calls_count}</span></div>
+                      <div className="eval-detail-row"><span>Answer length</span><span>{result.evaluation.details.answer_length} chars</span></div>
+                    </div>
+                  )}
+                </>
+            }
+          </Panel>
+        </div>
+      </div>
+
+      {/* ── Answer ──────────────────────────────────────────────────────── */}
+      {result?.answer && (
+        <div className="answer-section">
+          <Panel icon={FlaskConical} title="Research Answer" accent="#4ade80" defaultOpen={true}>
+            <div className="markdown-body">
+              <ReactMarkdown>{result.answer}</ReactMarkdown>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* ── Loading empty state ──────────────────────────────────────────── */}
+      {!result && !loading && !error && (
+        <div className="empty-state">
+          <Cpu size={56} className="empty-icon pulse-slow" />
+          <h2>MARS-Lite Dashboard</h2>
+          <p>Enter a query and click Execute to watch the agent pipeline run in real time.</p>
+          <div className="empty-hints">
+            <span>Try: <em>What is RAG in AI?</em></span>
+            <span>Try: <em>How does LangGraph work?</em></span>
+            <span>Try: <em>Latest advances in AI agents 2025</em></span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

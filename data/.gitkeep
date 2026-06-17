@@ -1,3 +1,2 @@
-# data directory — auto-created at runtime
-*
-!.gitkeep
+# This file ensures the data/ directory is tracked by git.
+# The actual runtime files (memory.json, traces.json) are gitignored.

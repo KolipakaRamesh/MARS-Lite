@@ -1,29 +1,20 @@
-"""Quick smoke test for MARS system — validates all modules load and core utilities work."""
+"""Quick smoke test for MARS-Lite system — validates all modules load and core utilities work."""
 import sys
 sys.path.insert(0, '.')
 
 from backend.config.settings import settings
 from backend.llm import get_provider
 from backend.orchestration.state import AgentState, initial_state
-from backend.orchestration.router import route_after_research, route_after_review
+from backend.orchestration.router import route_after_research
 from backend.orchestration.graph import build_graph
 from backend.tools.registry import build_default_registry
 from backend.tools.web_search import web_search
-from backend.tools.wiki_search import wiki_search
-from backend.tools.calculator import calculator
-from backend.tools.file_reader import file_reader
-from backend.memory.long_term import LongTermMemory
-from backend.memory.episodic import EpisodicMemory
 from backend.agents.base import BaseAgent
 from backend.agents.planner import PlannerAgent
 from backend.agents.analyst import AnalystAgent
-from backend.agents.reviewer import ReviewerAgent
+from backend.agents.research import ResearchAgent
 
-print("All MARS modules imported successfully")
-
-# Calculator (pure function, no external calls)
-result = calculator("(2 ** 10) + (3 * 4)")
-print(f"Calculator test: {result}")
+print("All MARS-Lite modules imported successfully")
 
 # State factory
 state = initial_state("What is quantum computing?", "test-session")
@@ -40,5 +31,6 @@ print(f"LLM provider: {provider.model}")
 
 print()
 print("=" * 50)
-print("MARS system validation PASSED")
+print("MARS-Lite system validation PASSED")
 print("=" * 50)
+

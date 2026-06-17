@@ -1,89 +1,13 @@
-:root {
-  --bg-primary: #0a0b10;
-  --bg-secondary: #12141d;
-  --bg-accent: #1e2130;
-  
-  --text-primary: #f8f9fa;
-  --text-secondary: #a0a6b5;
-  --text-accent: #4cc9f0;
-  
-  --accent-blue: #4cc9f0;
-  --accent-cyan: #4895ef;
-  --accent-purple: #7209b7;
-  --accent-green: #4ade80;
-  
-  --border: rgba(255, 255, 255, 0.08);
-  --glass: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.05);
-  
-  --shadow-lg: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
-  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  line-height: 1.6;
-  font-weight: 400;
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/* MARS-Lite — index.css: base resets only, all styles in App.css */
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  display: flex;
-  min-width: 320px;
-  min-height: 100vh;
-  overflow-x: hidden;
+  background: #0f172a;
+  color: #f8fafc;
 }
 
 #root {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
+  min-height: 100vh;
 }
 
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulse {
-  0% { opacity: 1; }
-  50% { opacity: 0.5; }
-  100% { opacity: 1; }
-}
-
-.fade-in {
-  animation: fadeIn 0.5s ease-out forwards;
-}
-
-.pulse {
-  animation: pulse 2s infinite ease-in-out;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--bg-primary);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--bg-accent);
-  border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-blue);
-}

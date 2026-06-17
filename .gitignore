@@ -1,44 +1,99 @@
+# ── Secrets & Environment ────────────────────────────────────────
 .env
 .env.local
-node_modules/
-frontend/node_modules/
-frontend/dist/
+.env.*.local
+
+# ── Python ───────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pdb
 .Python
+*.egg
 *.egg-info/
 dist/
 build/
+wheels/
+pip-wheel-metadata/
+.installed.cfg
+lib/
+lib64/
+
+# Virtual environments
 .venv/
 venv/
-data/episodes.jsonl
+env/
+ENV/
 
-*.log
-.DS_Store
-.vscode/
-.idea/
-
-# Local history
-.history/
-
-# Node
-.npm
-.eslintcache
-
-# Python
+# Testing & Coverage
 .pytest_cache/
 .tox/
 .coverage
+.coverage.*
 htmlcov/
-nosetests.xml
 coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+nosetests.xml
 
-# OS
+# Type checking
+.mypy_cache/
+.pytype/
+.pyre/
+
+# ── Node / Frontend ───────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm
+.eslintcache
+.pnp.*
+.yarn/
+
+# ── MARS-Lite Runtime Data ────────────────────────────────────────
+# These are generated at runtime — do not commit
+data/memory.json
+data/traces.json
+data/episodes.jsonl
+
+# Keep the data directory itself in the repo
+!data/.gitkeep
+
+# Scratch scripts (temporary dev helpers)
+scratch/
+
+# ── IDE & Editor ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+# ── OS ────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Convex (legacy — no longer used in MARS-Lite) ─────────────────
+.convex/
+convex/_generated/
+
+# ── Misc ──────────────────────────────────────────────────────────
+*.bak
+*.tmp
+*.orig
