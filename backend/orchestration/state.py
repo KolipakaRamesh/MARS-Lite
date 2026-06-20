@@ -16,6 +16,10 @@ class AgentState(TypedDict):
     # ── Input ────────────────────────────────────────────────────────────────
     query: str
     session_id: str
+    step_mode: bool
+    planner_model: str
+    research_model: str
+    analyst_model: str
 
     # ── Context Memory ───────────────────────────────────────────────────────
     memory_context: str
@@ -78,4 +82,8 @@ def initial_state(query: str, session_id: str = "default") -> AgentState:
         llm_usage=[],
         agent_trace=[],
         error=None,
+        step_mode=False,
+        planner_model="",
+        research_model="",
+        analyst_model="",
     )

@@ -522,6 +522,18 @@ MARS-Lite is a deliberate simplification. The following were intentionally remov
 
 ---
 
+## Advanced Features (V2.0 Upgrade)
+
+MARS-Lite features advanced debugger and model customization capabilities built directly into the UI:
+
+1. **Live Thought Streaming**: The ReAct agent streams its intermediate thoughts, proposed actions, and tool observations to the timeline in real-time as they happen.
+2. **Step-by-Step Debugger Mode**: When toggled, the agent halts prior to executing any tool call, prompting the user for approval. Clicking "Approve Action" resumes the execution.
+3. **Dynamic Model Selection**: Change models for the Planner, Research, and Analyst agents directly on the dashboard to test different configurations (e.g. Llama 3.2 3B vs Llama 3.3 70B).
+4. **Thread-Safe Local Stores**: Implements reentrant read/write locks around the JSON files (`traces.json`, `memory.json`) to prevent data corruption under concurrent requests.
+5. **SSE Resilient Reconnection**: Auto-reconnects with exponential backoff on connection drops during agent runs.
+
+---
+
 ## Try These Queries
 
 ```
@@ -539,8 +551,6 @@ How does DuckDuckGo protect user privacy?
 
 | Item | Notes |
 |---|---|
-| **Concurrent write races** | `data/memory.json` and `data/traces.json` are not thread-safe under concurrent requests |
 | **Token tracking fallback** | If OpenRouter returns no usage data, token counts default to 0 |
 | **DuckDuckGo rate limits** | No API key = vulnerable to `429 Too Many Requests` under load |
-| **SSE reconnection** | Frontend does not retry a dropped SSE stream mid-run |
 | **No auth** | The API has no authentication — suitable for local development only |

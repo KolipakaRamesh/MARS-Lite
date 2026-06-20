@@ -48,23 +48,30 @@ def _extract_budget(query: str) -> Optional[str]:
     return match.group() if match else None
 
 
+import threading
+
+_memory_lock = threading.RLock()
+
+
 def _load() -> dict:
     """Read memory from disk, returning empty structure on failure."""
-    try:
-        if MEMORY_FILE.exists():
-            return json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("Could not read memory file: %s", exc)
-    return {"last_query": None, "last_category": None, "last_budget": None, "timestamp": None, "history": []}
+    with _memory_lock:
+        try:
+            if MEMORY_FILE.exists():
+                return json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Could not read memory file: %s", exc)
+        return {"last_query": None, "last_category": None, "last_budget": None, "timestamp": None, "history": []}
 
 
 def _save(data: dict) -> None:
     """Persist memory to disk."""
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        MEMORY_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Could not save memory: %s", exc)
+    with _memory_lock:
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            MEMORY_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Could not save memory: %s", exc)
 
 
 def store(query: str) -> dict:
@@ -72,31 +79,34 @@ def store(query: str) -> dict:
     Store query context after a successful run.
     Returns the updated memory snapshot.
     """
-    current = _load()
-    entry = {
-        "last_query":    query,
-        "last_category": _infer_category(query),
-        "last_budget":   _extract_budget(query),
-        "timestamp":     datetime.now(timezone.utc).isoformat(),
-    }
+    with _memory_lock:
+        current = _load()
+        entry = {
+            "last_query":    query,
+            "last_category": _infer_category(query),
+            "last_budget":   _extract_budget(query),
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
+        }
 
-    # Prepend to history (keep last 10)
-    history = current.get("history", [])
-    history.insert(0, entry)
-    history = history[:10]
+        # Prepend to history (keep last 10)
+        history = current.get("history", [])
+        history.insert(0, entry)
+        history = history[:10]
 
-    data = {**entry, "history": history}
-    _save(data)
-    logger.info("Memory stored: category=%s query=%s", entry["last_category"], query[:60])
-    return data
+        data = {**entry, "history": history}
+        _save(data)
+        logger.info("Memory stored: category=%s query=%s", entry["last_category"], query[:60])
+        return data
 
 
 def retrieve() -> dict:
     """Return current memory contents."""
-    return _load()
+    with _memory_lock:
+        return _load()
 
 
 def clear() -> None:
     """Reset memory to empty."""
-    _save({"last_query": None, "last_category": None, "last_budget": None, "timestamp": None, "history": []})
-    logger.info("Memory cleared")
+    with _memory_lock:
+        _save({"last_query": None, "last_category": None, "last_budget": None, "timestamp": None, "history": []})
+        logger.info("Memory cleared")

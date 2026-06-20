@@ -161,6 +161,15 @@ export default function App() {
   const [memoryContextTokens, setMemoryContextTokens] = useState(0);
   const esRef = useRef(null);
 
+  // New features state
+  const [plannerModel, setPlannerModel]   = useState('meta-llama/llama-3.2-3b-instruct');
+  const [researchModel, setResearchModel] = useState('meta-llama/llama-3.1-8b-instruct');
+  const [analystModel, setAnalystModel]   = useState('meta-llama/llama-3.1-8b-instruct');
+  const [stepMode, setStepMode]           = useState(false);
+  const [reactSteps, setReactSteps]       = useState([]);
+  const [pendingApproval, setPendingApproval] = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+
   // Load memory on mount
   useEffect(() => {
     fetch(`${API_BASE}/memory`).then(r => r.json()).then(setMemory).catch(() => {});
@@ -177,62 +186,117 @@ export default function App() {
     setTimeline([]);
     setLiveAgent(null);
     setMemoryContextTokens(0);
+    setReactSteps([]);
+    setPendingApproval(null);
 
     const sessionId = `mars-lite-${Date.now()}`;
-    const url = `${API_BASE}/run/stream?query=${encodeURIComponent(query)}&session_id=${sessionId}`;
+    setCurrentSessionId(sessionId);
+    const url = `${API_BASE}/run/stream?query=${encodeURIComponent(query)}&session_id=${sessionId}&step_mode=${stepMode}&planner_model=${plannerModel}&research_model=${researchModel}&analyst_model=${analystModel}`;
 
     // Close previous EventSource if any
     if (esRef.current) esRef.current.close();
 
-    const es = new EventSource(url);
-    esRef.current = es;
+    let retryCount = 0;
+    const connect = () => {
+      if (esRef.current) esRef.current.close();
+      const es = new EventSource(url);
+      esRef.current = es;
 
-    es.addEventListener('agent_start', (e) => {
-      const data = JSON.parse(e.data);
-      setLiveAgent(data.agent);
-      if (data.memory_context_tokens !== undefined) {
-        setMemoryContextTokens(data.memory_context_tokens);
-      }
-      setTimeline(prev => [...prev, { type: 'agent_start', ...data }]);
-    });
+      es.addEventListener('agent_start', (e) => {
+        const data = JSON.parse(e.data);
+        setLiveAgent(data.agent);
+        if (data.memory_context_tokens !== undefined) {
+          setMemoryContextTokens(data.memory_context_tokens);
+        }
+        setTimeline(prev => [...prev, { type: 'agent_start', ...data }]);
+      });
 
-    es.addEventListener('agent_end', (e) => {
-      const data = JSON.parse(e.data);
-      if (data.memory_context_tokens !== undefined) {
-        setMemoryContextTokens(data.memory_context_tokens);
-      }
-      setTimeline(prev => [...prev, { type: 'agent_end', ...data }]);
-    });
+      es.addEventListener('agent_end', (e) => {
+        const data = JSON.parse(e.data);
+        if (data.memory_context_tokens !== undefined) {
+          setMemoryContextTokens(data.memory_context_tokens);
+        }
+        setTimeline(prev => [...prev, { type: 'agent_end', ...data }]);
+      });
 
-    es.addEventListener('result', (e) => {
-      const data = JSON.parse(e.data);
-      setResult(data);
-      setMemory(data.memory);
-      if (data.memory_context_tokens !== undefined) {
-        setMemoryContextTokens(data.memory_context_tokens);
-      }
-      setLiveAgent(null);
-      setLoading(false);
-      es.close();
-    });
+      es.addEventListener('react_step', (e) => {
+        const data = JSON.parse(e.data);
+        setReactSteps(prev => [...prev, data]);
+      });
 
-    es.addEventListener('error', (e) => {
-      let msg = 'Pipeline error';
-      try { msg = JSON.parse(e.data).detail; } catch (_) {}
-      setError(msg);
-      setLiveAgent(null);
-      setLoading(false);
-      es.close();
-    });
+      es.addEventListener('react_observation', (e) => {
+        const data = JSON.parse(e.data);
+        setReactSteps(prev => {
+          return prev.map(s => {
+            if (s.subtask_index === data.subtask_index && s.step === data.step) {
+              return { ...s, observation: data.observation };
+            }
+            return s;
+          });
+        });
+      });
 
-    es.onerror = () => {
-      if (loading) {
-        setError('Connection lost. Is the backend running?');
+      es.addEventListener('step_pending', (e) => {
+        const data = JSON.parse(e.data);
+        setPendingApproval(data);
+      });
+
+      es.addEventListener('result', (e) => {
+        const data = JSON.parse(e.data);
+        setResult(data);
+        setMemory(data.memory);
+        if (data.memory_context_tokens !== undefined) {
+          setMemoryContextTokens(data.memory_context_tokens);
+        }
+        setLiveAgent(null);
+        setPendingApproval(null);
         setLoading(false);
-      }
-      es.close();
+        es.close();
+      });
+
+      es.addEventListener('error', (e) => {
+        let msg = 'Pipeline error';
+        try { msg = JSON.parse(e.data).detail; } catch (_) {}
+        setError(msg);
+        setLiveAgent(null);
+        setPendingApproval(null);
+        setLoading(false);
+        es.close();
+      });
+
+      es.onerror = () => {
+        if (loading && retryCount < 3) {
+          retryCount++;
+          console.log(`SSE connection dropped, retrying ${retryCount}/3...`);
+          setTimeout(connect, 2000);
+        } else if (loading) {
+          setError('Connection lost after multiple attempts.');
+          setLiveAgent(null);
+          setPendingApproval(null);
+          setLoading(false);
+          es.close();
+        }
+      };
     };
-  }, [query, loading]);
+
+    connect();
+  }, [query, loading, stepMode, plannerModel, researchModel, analystModel]);
+
+  const handleApprove = useCallback(async () => {
+    if (!pendingApproval || !currentSessionId) return;
+    try {
+      const res = await fetch(`${API_BASE}/run/approve?session_id=${currentSessionId}`, { method: 'POST' });
+      if (res.ok) {
+        setPendingApproval(null);
+      } else {
+        const err = await res.json();
+        setError(err.detail || 'Approval failed');
+      }
+    } catch (err) {
+      console.error('Failed to approve step:', err);
+      setError('Failed to send approval to server.');
+    }
+  }, [pendingApproval, currentSessionId]);
 
   const handleClearTraces = useCallback(async () => {
     if (loading) return;
@@ -272,9 +336,25 @@ export default function App() {
   const subtasks = plannerEnd?.subtasks || result?.subtasks;
 
   const researchEnds = timeline.filter(e => e.type === 'agent_end' && e.agent_name === 'research');
-  const toolCalls = researchEnds.length > 0
+
+  // Extract live tool calls from reactSteps that have tool executions
+  const liveToolCalls = reactSteps
+    .filter(s => s.tool)
+    .map(s => ({
+      tool: s.tool,
+      input: s.tool_input,
+      output: s.observation || 'Executing...',
+      duration_ms: 0,
+      timestamp: new Date().toISOString()
+    }));
+
+  const finalizedToolCalls = researchEnds.length > 0
     ? researchEnds.flatMap(e => e.tool_calls || [])
     : (result?.tool_calls || []);
+
+  const toolCalls = loading
+    ? [...finalizedToolCalls, ...liveToolCalls.slice(finalizedToolCalls.length)]
+    : finalizedToolCalls;
 
   const analystEnd = timeline.find(e => e.type === 'agent_end' && e.agent_name === 'analyst');
   const answer = analystEnd?.synthesized_answer || result?.answer;
@@ -348,6 +428,43 @@ export default function App() {
           </button>
         </form>
 
+        {/* Config settings row */}
+        <div className="config-section" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center', marginBottom: '14px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 16px', fontSize: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>Planner:</span>
+            <select value={plannerModel} onChange={e => setPlannerModel(e.target.value)} disabled={loading} style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-pri)', padding: '4px 8px', borderRadius: 'var(--radius-sm)', outline: 'none' }}>
+              <option value="meta-llama/llama-3.2-3b-instruct">Llama 3.2 3B (Fast)</option>
+              <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B (Standard)</option>
+              <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B (Max Quality)</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>Research:</span>
+            <select value={researchModel} onChange={e => setResearchModel(e.target.value)} disabled={loading} style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-pri)', padding: '4px 8px', borderRadius: 'var(--radius-sm)', outline: 'none' }}>
+              <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B (Standard)</option>
+              <option value="meta-llama/llama-3.2-3b-instruct">Llama 3.2 3B (Fast)</option>
+              <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B (Max Quality)</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>Analyst:</span>
+            <select value={analystModel} onChange={e => setAnalystModel(e.target.value)} disabled={loading} style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-pri)', padding: '4px 8px', borderRadius: 'var(--radius-sm)', outline: 'none' }}>
+              <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B (Standard)</option>
+              <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B (Max Quality)</option>
+              <option value="meta-llama/llama-3.2-3b-instruct">Llama 3.2 3B (Fast)</option>
+            </select>
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: 'var(--text-pri)', fontWeight: 500 }}>
+              <input type="checkbox" checked={stepMode} onChange={e => setStepMode(e.target.checked)} disabled={loading} style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+              Step-by-Step Mode (Debugger)
+            </label>
+          </div>
+        </div>
+
         {/* Agent pipeline indicators */}
         <div className="pipeline-bar">
           {PIPELINE.map((stage, i) => {
@@ -405,10 +522,32 @@ export default function App() {
                     {loading && liveAgent && (
                       <div className="timeline-row timeline-live">
                         <div className="timeline-dot pulse" style={{ background: AGENT_COLORS[liveAgent]?.color }} />
-                        <div className="timeline-content">
+                        <div className="timeline-content" style={{ width: '100%' }}>
                           <span className="timeline-agent" style={{ color: AGENT_COLORS[liveAgent]?.color }}>{liveAgent}</span>
                           <span className="timeline-event">running…</span>
                           <Activity size={12} className="pulse" style={{color:'#38bdf8'}}/>
+                          
+                          {/* Live thoughts stream */}
+                          {liveAgent === 'research' && reactSteps.length > 0 && (
+                            <div className="live-thoughts" style={{ marginTop: '8px', paddingLeft: '8px', borderLeft: '1px dashed var(--border)', fontSize: '11px', color: 'var(--text-dim)' }}>
+                              {reactSteps.map((s, idx) => (
+                                <div key={idx} style={{ marginBottom: '6px' }}>
+                                  <div style={{ color: 'var(--accent-purple)', fontWeight: 500 }}>Thought {s.step}:</div>
+                                  <div style={{ fontStyle: 'italic', marginBottom: '2px', color: 'var(--text-sec)' }}>{s.thought}</div>
+                                  {s.tool && (
+                                    <div style={{ color: 'var(--accent-blue)', fontSize: '10px' }}>
+                                      🔧 Call: {s.tool}({s.tool_input})
+                                    </div>
+                                  )}
+                                  {s.final_answer && (
+                                    <div style={{ color: 'var(--accent-green)', fontSize: '10px' }}>
+                                      ✓ Final Answer reached
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}

@@ -90,8 +90,12 @@ app.add_middleware(
 # ── Request / Response Models ─────────────────────────────────────────────────
 
 class QueryRequest(BaseModel):
-    query:      str = Field(..., min_length=3, description="The research question")
-    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    query:          str = Field(..., min_length=3, description="The research question")
+    session_id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
+    step_mode:      bool = False
+    planner_model:  str | None = None
+    research_model: str | None = None
+    analyst_model:  str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -110,12 +114,26 @@ class QueryResponse(BaseModel):
 
 # ── Internal pipeline runner ──────────────────────────────────────────────────
 
-async def _run_pipeline(session_id: str, query: str) -> dict:
+async def _run_pipeline(
+    session_id: str,
+    query: str,
+    step_mode: bool = False,
+    planner_model: str = None,
+    research_model: str = None,
+    analyst_model: str = None,
+) -> dict:
     """Execute the full agent pipeline and return the final state."""
     if _graph is None:
         raise RuntimeError("Graph not initialized")
 
     state = initial_state(query, session_id)
+    state["step_mode"] = step_mode
+    if planner_model:
+        state["planner_model"] = planner_model
+    if research_model:
+        state["research_model"] = research_model
+    if analyst_model:
+        state["analyst_model"] = analyst_model
     return await _graph.ainvoke(state)
 
 
@@ -133,7 +151,14 @@ async def run_query(req: QueryRequest):
         raise HTTPException(status_code=503, detail="System not initialized")
 
     try:
-        final_state = await _run_pipeline(req.session_id, req.query)
+        final_state = await _run_pipeline(
+            session_id=req.session_id,
+            query=req.query,
+            step_mode=req.step_mode,
+            planner_model=req.planner_model,
+            research_model=req.research_model,
+            analyst_model=req.analyst_model,
+        )
     except Exception as exc:
         logger.error("Pipeline failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -159,8 +184,12 @@ async def run_query(req: QueryRequest):
 
 @app.get("/run/stream")
 async def run_stream(
-    query:      str = Query(..., min_length=3),
-    session_id: str = Query(default_factory=lambda: str(uuid.uuid4())),
+    query:          str = Query(..., min_length=3),
+    session_id:     str = Query(default_factory=lambda: str(uuid.uuid4())),
+    step_mode:      bool = Query(default=False),
+    planner_model:  str = Query(default=None),
+    research_model: str = Query(default=None),
+    analyst_model:  str = Query(default=None),
 ):
     """
     SSE endpoint — streams agent events in real time.
@@ -181,7 +210,14 @@ async def run_stream(
         try:
             # Run the pipeline as a background task so we can poll the queue
             pipeline_task = asyncio.create_task(
-                _run_pipeline(session_id, query)
+                _run_pipeline(
+                    session_id=session_id,
+                    query=query,
+                    step_mode=step_mode,
+                    planner_model=planner_model,
+                    research_model=research_model,
+                    analyst_model=analyst_model,
+                )
             )
 
             # Drain events while the pipeline is running
@@ -264,6 +300,16 @@ def delete_memory():
     """Clear all stored memory."""
     simple_memory.clear()
     return {"status": "cleared"}
+
+
+@app.post("/run/approve")
+def approve_step(session_id: str = Query(...)):
+    """API endpoint to approve a pending debugger step and resume execution."""
+    from backend.observability.tracer import set_approval_event
+    success = set_approval_event(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Active step pending approval not found for this session")
+    return {"status": "approved"}
 
 
 # ── Serve Frontend ────────────────────────────────────────────────────────────

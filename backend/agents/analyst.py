@@ -49,7 +49,8 @@ class AnalystAgent(BaseAgent):
             f"Synthesize a complete answer now."
         )
 
-        answer, usage = await self.llm.invoke_with_usage(ANALYST_SYSTEM_PROMPT, user_msg)
+        model = state.get("analyst_model") or settings.analyst_model
+        answer, usage = await self.llm.invoke_with_usage(ANALYST_SYSTEM_PROMPT, user_msg, model=model)
 
         return {
             "synthesized_answer": answer,

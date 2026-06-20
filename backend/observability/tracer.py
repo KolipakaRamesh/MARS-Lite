@@ -23,41 +23,74 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 TRACES_FILE = DATA_DIR / "traces.json"
 
+import threading
+import asyncio
+
+_traces_lock = threading.RLock()
+_session_approvals: dict[str, asyncio.Event] = {}
+
+
+def register_approval_event(session_id: str, event: asyncio.Event) -> None:
+    """Register an event to await user approval in step-by-step mode."""
+    _session_approvals[session_id] = event
+
+
+def set_approval_event(session_id: str) -> bool:
+    """Signal that a step has been approved."""
+    if session_id in _session_approvals:
+        _session_approvals[session_id].set()
+        return True
+    return False
+
+
+def clear_approval_event(session_id: str) -> None:
+    """Remove approval event registration."""
+    _session_approvals.pop(session_id, None)
+
+
+def push_sse_event(request_id: str | None, event_type: str, data: dict) -> None:
+    """Expose a public function to push custom events to SSE (e.g. ReAct thoughts)."""
+    _push_event(request_id, event_type, data)
+
 
 def _load_traces() -> list:
     """Read all stored traces from disk."""
-    try:
-        if TRACES_FILE.exists():
-            return json.loads(TRACES_FILE.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("Could not read traces file: %s", exc)
-    return []
+    with _traces_lock:
+        try:
+            if TRACES_FILE.exists():
+                return json.loads(TRACES_FILE.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Could not read traces file: %s", exc)
+        return []
 
 
 def _save_trace(span: dict) -> None:
     """Append a completed span to the traces file."""
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        traces = _load_traces()
-        traces.append(span)
-        # Keep only the last 100 traces to avoid unbounded growth
-        traces = traces[-100:]
-        TRACES_FILE.write_text(json.dumps(traces, indent=2), encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Could not save trace: %s", exc)
+    with _traces_lock:
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            traces = _load_traces()
+            traces.append(span)
+            # Keep only the last 100 traces to avoid unbounded growth
+            traces = traces[-100:]
+            TRACES_FILE.write_text(json.dumps(traces, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Could not save trace: %s", exc)
 
 
 def get_all_traces() -> list:
     """Public API: return all stored traces (used by /traces endpoint)."""
-    return _load_traces()
+    with _traces_lock:
+        return _load_traces()
 
 
 def clear_traces() -> None:
     """Clear all stored traces."""
-    try:
-        TRACES_FILE.write_text("[]", encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Could not clear traces: %s", exc)
+    with _traces_lock:
+        try:
+            TRACES_FILE.write_text("[]", encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Could not clear traces: %s", exc)
 
 
 # ── In-memory SSE event queue (populated during graph execution) ──────────────

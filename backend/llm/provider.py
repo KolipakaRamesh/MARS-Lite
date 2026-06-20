@@ -12,12 +12,12 @@ class LLMProvider(ABC):
     """Minimal contract every LLM backend must implement."""
 
     @abstractmethod
-    async def invoke(self, system_prompt: str, user_message: str) -> str:
+    async def invoke(self, system_prompt: str, user_message: str, model: str = None) -> str:
         """Single-turn call. Returns the assistant content string."""
         ...
 
     @abstractmethod
-    async def chat(self, system_prompt: str, messages: List[Dict[str, str]]) -> str:
+    async def chat(self, system_prompt: str, messages: List[Dict[str, str]], model: str = None) -> str:
         """
         Multi-turn call.
         messages: [{"role": "user"|"assistant", "content": "..."}]
@@ -26,11 +26,11 @@ class LLMProvider(ABC):
         ...
 
     @abstractmethod
-    async def chat_with_usage(self, system_prompt: str, messages: List[Dict[str, str]]) -> Tuple[str, dict]:
+    async def chat_with_usage(self, system_prompt: str, messages: List[Dict[str, str]], model: str = None) -> Tuple[str, dict]:
         """Multi-turn call that also returns usage data."""
         ...
 
     @abstractmethod
-    async def invoke_with_usage(self, system_prompt: str, user_message: str) -> Tuple[str, dict]:
+    async def invoke_with_usage(self, system_prompt: str, user_message: str, model: str = None) -> Tuple[str, dict]:
         """Single-turn call that also returns usage data."""
         ...

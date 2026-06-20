@@ -43,8 +43,9 @@ class PlannerAgent(BaseAgent):
 
         logger.info("[Planner] Decomposing query: %s", query[:80])
 
+        model = state.get("planner_model") or settings.planner_model
         try:
-            raw, usage = await self.llm.invoke_with_usage(PLANNER_SYSTEM_PROMPT, user_input)
+            raw, usage = await self.llm.invoke_with_usage(PLANNER_SYSTEM_PROMPT, user_input, model=model)
             subtasks = self._parse_subtasks(raw)
         except Exception as exc:
             logger.warning("[Planner] Failed, falling back to single subtask: %s", exc)
