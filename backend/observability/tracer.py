@@ -159,6 +159,8 @@ def trace_agent(span_name: str) -> Callable:
                     "memory_context_tokens": state.get("memory_context_tokens", 0),
                     # Also include tool_calls if research agent produced any
                     "tool_calls": result.get("tool_calls", []),
+                    "subtasks": result.get("subtasks"),
+                    "synthesized_answer": result.get("synthesized_answer"),
                 })
 
         return wrapper

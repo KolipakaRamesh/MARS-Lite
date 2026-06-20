@@ -4,7 +4,7 @@ import {
   Search, Cpu, Activity, CheckCircle2, Clock, AlertCircle,
   Database, Layers, Zap, BarChart2, Bot, Globe, Brain,
   FlaskConical, MemoryStick, ListChecks, ChevronDown, ChevronRight,
-  Timer, TrendingUp, Terminal, Info
+  Timer, TrendingUp, Terminal, Info, Trash2
 } from 'lucide-react';
 import './App.css';
 
@@ -234,18 +234,80 @@ export default function App() {
     };
   }, [query, loading]);
 
+  const handleClearTraces = useCallback(async () => {
+    if (loading) return;
+    try {
+      const res = await fetch(`${API_BASE}/traces`, { method: 'DELETE' });
+      if (res.ok) {
+        setTimeline([]);
+        setResult(null);
+      }
+    } catch (err) {
+      console.error('Failed to clear traces:', err);
+    }
+  }, [loading]);
+
+  const handleClearMemory = useCallback(async () => {
+    if (loading) return;
+    try {
+      const res = await fetch(`${API_BASE}/memory`, { method: 'DELETE' });
+      if (res.ok) {
+        setMemory(null);
+        setMemoryContextTokens(0);
+      }
+    } catch (err) {
+      console.error('Failed to clear memory:', err);
+    }
+  }, [loading]);
+
+
   // Derived data
   const agentEndEvents = timeline.filter(e => e.type === 'agent_end');
   const totalDuration  = agentEndEvents.reduce((s, e) => s + (e.duration_ms || 0), 0);
   const totalTokens    = agentEndEvents.reduce((s, e) => s + (e.total_tokens || 0), 0) + memoryContextTokens;
   const maxTokens      = Math.max(...agentEndEvents.map(e => e.total_tokens || 0), memoryContextTokens, 1);
 
-  // Context handoff from result
-  const contextHandoffs = result ? [
-    { agent: 'planner',  input: result.query,    output: result.subtasks?.join('\n') },
-    { agent: 'research', input: result.subtasks?.join(' | '), output: result.tool_calls?.length ? `${result.tool_calls.length} web search(es) executed` : 'No tool calls recorded' },
-    { agent: 'analyst',  input: 'Research notes from all subtasks', output: result.answer?.slice(0, 300) + (result.answer?.length > 300 ? '…' : '') },
-  ] : [];
+  // Extract subtasks, tool calls, and answer dynamically from timeline events, falling back to final result
+  const plannerEnd = timeline.find(e => e.type === 'agent_end' && e.agent_name === 'planner');
+  const subtasks = plannerEnd?.subtasks || result?.subtasks;
+
+  const researchEnds = timeline.filter(e => e.type === 'agent_end' && e.agent_name === 'research');
+  const toolCalls = researchEnds.length > 0
+    ? researchEnds.flatMap(e => e.tool_calls || [])
+    : (result?.tool_calls || []);
+
+  const analystEnd = timeline.find(e => e.type === 'agent_end' && e.agent_name === 'analyst');
+  const answer = analystEnd?.synthesized_answer || result?.answer;
+
+  // Construct context handoffs array incrementally
+  const contextHandoffs = [];
+  if (subtasks && subtasks.length > 0) {
+    contextHandoffs.push({
+      agent: 'planner',
+      input: query,
+      output: subtasks.join('\n'),
+    });
+
+    const researchActive = liveAgent === 'research';
+    const hasEnded = timeline.some(e => e.type === 'agent_end' && e.agent_name === 'research');
+    if (researchActive || hasEnded || result) {
+      contextHandoffs.push({
+        agent: 'research',
+        input: subtasks.join(' | '),
+        output: toolCalls.length > 0
+          ? `${toolCalls.length} web search(es) executed`
+          : (hasEnded || result) ? 'No tool calls recorded' : 'Running research...',
+      });
+    }
+  }
+
+  if (answer) {
+    contextHandoffs.push({
+      agent: 'analyst',
+      input: 'Research notes from all subtasks',
+      output: answer.slice(0, 300) + (answer.length > 300 ? '…' : ''),
+    });
+  }
 
   return (
     <div className="app">
@@ -327,29 +389,36 @@ export default function App() {
           <Panel icon={Clock} title="Timeline" badge={timeline.length} accent="#a78bfa">
             {timeline.length === 0
               ? <div className="empty-hint"><Info size={13}/> Run a query to see events</div>
-              : <div className="timeline">
-                  {timeline.map((evt, i) => (
-                    <TimelineEvent
-                      key={i}
-                      agent={evt.agent || evt.agent_name}
-                      event={evt.type}
-                      timestamp={evt.timestamp || evt.start_time}
-                      durationMs={evt.duration_ms}
-                      tokensIn={evt.tokens_in}
-                      tokensOut={evt.tokens_out}
-                    />
-                  ))}
-                  {loading && liveAgent && (
-                    <div className="timeline-row timeline-live">
-                      <div className="timeline-dot pulse" style={{ background: AGENT_COLORS[liveAgent]?.color }} />
-                      <div className="timeline-content">
-                        <span className="timeline-agent" style={{ color: AGENT_COLORS[liveAgent]?.color }}>{liveAgent}</span>
-                        <span className="timeline-event">running…</span>
-                        <Activity size={12} className="pulse" style={{color:'#38bdf8'}}/>
+              : <>
+                  <div className="timeline">
+                    {timeline.map((evt, i) => (
+                      <TimelineEvent
+                        key={i}
+                        agent={evt.agent || evt.agent_name}
+                        event={evt.type}
+                        timestamp={evt.timestamp || evt.start_time}
+                        durationMs={evt.duration_ms}
+                        tokensIn={evt.tokens_in}
+                        tokensOut={evt.tokens_out}
+                      />
+                    ))}
+                    {loading && liveAgent && (
+                      <div className="timeline-row timeline-live">
+                        <div className="timeline-dot pulse" style={{ background: AGENT_COLORS[liveAgent]?.color }} />
+                        <div className="timeline-content">
+                          <span className="timeline-agent" style={{ color: AGENT_COLORS[liveAgent]?.color }}>{liveAgent}</span>
+                          <span className="timeline-event">running…</span>
+                          <Activity size={12} className="pulse" style={{color:'#38bdf8'}}/>
+                        </div>
                       </div>
-                    </div>
+                    )}
+                  </div>
+                  {timeline.length > 0 && (
+                    <button className="clear-btn" onClick={handleClearTraces} disabled={loading}>
+                      <Trash2 size={12} /> Clear Traces
+                    </button>
                   )}
-                </div>
+                </>
             }
           </Panel>
 
@@ -362,10 +431,10 @@ export default function App() {
           </Panel>
 
           {/* 3. Tool Calls */}
-          <Panel icon={Terminal} title="Tool Calls" badge={result?.tool_calls?.length ?? 0} accent="#fb923c">
-            {!result?.tool_calls?.length
+          <Panel icon={Terminal} title="Tool Calls" badge={toolCalls.length} accent="#fb923c">
+            {toolCalls.length === 0
               ? <div className="empty-hint"><Info size={13}/> web_search calls appear here</div>
-              : result.tool_calls.map((c, i) => <ToolCallCard key={i} call={c} index={i} />)
+              : toolCalls.map((c, i) => <ToolCallCard key={i} call={c} index={i} />)
             }
           </Panel>
         </div>
@@ -440,23 +509,28 @@ export default function App() {
           <Panel icon={MemoryStick} title="Memory" accent="#ec4899">
             {!memory?.last_query
               ? <div className="empty-hint"><Info size={13}/> Memory stores the last query context</div>
-              : <div className="memory-grid">
-                  <div className="mem-item"><span className="mem-label">Last Query</span><span className="mem-value">{memory.last_query}</span></div>
-                  <div className="mem-item"><span className="mem-label">Category</span><span className="mem-value mem-tag">{memory.last_category}</span></div>
-                  {memory.last_budget && <div className="mem-item"><span className="mem-label">Budget</span><span className="mem-value">{memory.last_budget}</span></div>}
-                  <div className="mem-item"><span className="mem-label">Stored At</span><span className="mem-value">{ts_hms(memory.timestamp)}</span></div>
-                  {memory.history?.length > 0 && (
-                    <div className="mem-history">
-                      <span className="mem-label">History ({memory.history.length})</span>
-                      {memory.history.slice(0, 5).map((h, i) => (
-                        <div key={i} className="mem-history-item">
-                          <span className="mem-hist-cat">{h.last_category}</span>
-                          <span className="mem-hist-q">{h.last_query?.slice(0, 50)}{h.last_query?.length > 50 ? '…' : ''}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              : <>
+                  <div className="memory-grid">
+                    <div className="mem-item"><span className="mem-label">Last Query</span><span className="mem-value">{memory.last_query}</span></div>
+                    <div className="mem-item"><span className="mem-label">Category</span><span className="mem-value mem-tag">{memory.last_category}</span></div>
+                    {memory.last_budget && <div className="mem-item"><span className="mem-label">Budget</span><span className="mem-value">{memory.last_budget}</span></div>}
+                    <div className="mem-item"><span className="mem-label">Stored At</span><span className="mem-value">{ts_hms(memory.timestamp)}</span></div>
+                    {memory.history?.length > 0 && (
+                      <div className="mem-history">
+                        <span className="mem-label">History ({memory.history.length})</span>
+                        {memory.history.slice(0, 5).map((h, i) => (
+                          <div key={i} className="mem-history-item">
+                            <span className="mem-hist-cat">{h.last_category}</span>
+                            <span className="mem-hist-q">{h.last_query?.slice(0, 50)}{h.last_query?.length > 50 ? '…' : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button className="clear-btn" onClick={handleClearMemory} disabled={loading}>
+                    <Trash2 size={12} /> Clear Memory
+                  </button>
+                </>
             }
           </Panel>
 
@@ -489,11 +563,11 @@ export default function App() {
       </div>
 
       {/* ── Answer ──────────────────────────────────────────────────────── */}
-      {result?.answer && (
+      {answer && (
         <div className="answer-section">
           <Panel icon={FlaskConical} title="Research Answer" accent="#4ade80" defaultOpen={true}>
             <div className="markdown-body">
-              <ReactMarkdown>{result.answer}</ReactMarkdown>
+              <ReactMarkdown>{answer}</ReactMarkdown>
             </div>
           </Panel>
         </div>
