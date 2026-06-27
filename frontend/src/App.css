@@ -214,6 +214,41 @@ body {
   margin-bottom: 20px;
 }
 
+/* ── Approval bar ────────────────────────────────────────────── */
+.approval-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(245,158,11,0.08);
+  border: 1px solid rgba(245,158,11,0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  color: #f59e0b;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.approval-btn {
+  background: #f59e0b;
+  color: #1e1e2e;
+  border: none;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  transition: opacity 0.2s;
+}
+
+.approval-btn:hover {
+  opacity: 0.9;
+}
+
+
 /* ── Dashboard grid ──────────────────────────────────────────── */
 .dashboard-grid {
   display: grid;

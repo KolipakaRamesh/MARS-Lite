@@ -11,6 +11,7 @@ Criteria:
   score               — 0, 33, 66, or 100 (33 per passing criterion)
 """
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,11 @@ def evaluate(state: dict) -> dict:
     Returns:
         {
           "workflow_completed": bool,
-          "tool_called":        bool,
-          "task_completed":     bool,
-          "score":              int   (0 | 33 | 66 | 100)
+          "tool_use_health":    bool,
+          "answer_structured":   bool,
+          "source_grounded":     bool,
+          "execution_efficient": bool,
+          "score":              int   (0 - 100)
           "details":            dict  — per-criterion explanation
         }
     """
@@ -37,34 +40,70 @@ def evaluate(state: dict) -> dict:
     tool_calls:  list[dict] = state.get("tool_calls", [])
     answer: str             = state.get("synthesized_answer", "")
 
-    # ── Criterion 1: all three agents appear in the trace ───────────────────
-    agents_seen = {entry.get("agent") for entry in agent_trace}
+    # ── 1. Workflow Completed ────────────────────────────────────────────────
+    agents_seen = {entry.get("agent") for entry in agent_trace if entry.get("agent")}
     workflow_completed = _AGENT_NAMES.issubset(agents_seen)
 
-    # ── Criterion 2: at least one web_search was executed ───────────────────
-    tool_called = any(tc.get("tool") == "web_search" for tc in tool_calls)
+    # ── 2. Tool Use Health ───────────────────────────────────────────────────
+    has_tools = len(tool_calls) > 0
+    no_tool_errors = True
+    for tc in tool_calls:
+        out = str(tc.get("output", "")).lower()
+        if "failed" in out or "error" in out:
+            no_tool_errors = False
+            break
+    tool_use_health = has_tools and no_tool_errors
 
-    # ── Criterion 3: analyst produced a non-empty answer ────────────────────
-    task_completed = bool(answer and answer.strip())
+    # ── 3. Answer Structured ──────────────────────────────────────────────────
+    answer_stripped = answer.strip() if answer else ""
+    has_headers = bool(re.search(r"^##?\s+", answer_stripped, re.MULTILINE))
+    answer_structured = len(answer_stripped) > 300 and has_headers
 
-    # ── Score ────────────────────────────────────────────────────────────────
-    passed = sum([workflow_completed, tool_called, task_completed])
-    score  = passed * 33 + (1 if passed == 3 else 0)  # 100 when all pass
+    # ── 4. Source Grounded (Citations) ────────────────────────────────────────
+    if not has_tools:
+        source_grounded = True
+        citations_count = 0
+    else:
+        # Check if answer contains footnotes [1] or markdown links [name](url)
+        md_links = re.findall(r"\[([^\]]+)\]\((https?://[^\)]+)\)", answer)
+        footnotes = re.findall(r"\[\d+\]", answer)
+        citations_count = len(md_links) + len(footnotes)
+        source_grounded = citations_count > 0
+
+    # ── 5. Execution Efficient (Loop Free) ───────────────────────────────────
+    tool_queries = [tc.get("input", "").strip().lower() for tc in tool_calls if tc.get("tool") == "web_search"]
+    unique_queries = set(tool_queries)
+    execution_efficient = len(tool_queries) == len(unique_queries)
+
+    # ── Score calculation (20 points per check, max 100) ─────────────────────
+    passed = sum([
+        workflow_completed,
+        tool_use_health,
+        answer_structured,
+        source_grounded,
+        execution_efficient
+    ])
+    score = passed * 20
 
     result = {
         "workflow_completed": workflow_completed,
-        "tool_called":        tool_called,
-        "task_completed":     task_completed,
+        "tool_use_health":    tool_use_health,
+        "answer_structured":   answer_structured,
+        "source_grounded":     source_grounded,
+        "execution_efficient": execution_efficient,
         "score":              score,
         "details": {
-            "agents_seen":       sorted(agents_seen),
-            "tool_calls_count":  len(tool_calls),
-            "answer_length":     len(answer),
+            "agents_seen":           sorted(agents_seen),
+            "tool_calls_count":      len(tool_calls),
+            "unique_searches_count": len(unique_queries),
+            "citations_count":       citations_count,
+            "answer_length":         len(answer_stripped),
         },
     }
 
     logger.info(
-        "[Evaluator] score=%d workflow=%s tool=%s task=%s",
-        score, workflow_completed, tool_called, task_completed,
+        "[Evaluator] score=%d workflow=%s tool_health=%s structure=%s grounded=%s efficient=%s",
+        score, workflow_completed, tool_use_health, answer_structured, source_grounded, execution_efficient,
     )
     return result
+

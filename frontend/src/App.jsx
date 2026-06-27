@@ -4,7 +4,7 @@ import {
   Search, Cpu, Activity, CheckCircle2, Clock, AlertCircle,
   Database, Layers, Zap, BarChart2, Bot, Globe, Brain,
   FlaskConical, MemoryStick, ListChecks, ChevronDown, ChevronRight,
-  Timer, TrendingUp, Terminal, Info, Trash2
+  Timer, TrendingUp, Terminal, Info, Trash2, Check
 } from 'lucide-react';
 import './App.css';
 
@@ -30,7 +30,8 @@ const fmt_tok = (n)   => n >= 1000 ? `${(n / 1000).toFixed(1)}k`  : (n || 0).toS
 const ts_hms  = (iso) => iso ? new Date(iso).toLocaleTimeString() : '—';
 
 // ── Collapsible card ──────────────────────────────────────────────────────────
-function Panel({ icon: Icon, title, badge, children, defaultOpen = true, accent }) {
+function Panel({ icon, title, badge, children, defaultOpen = true, accent }) {
+  const Icon = icon;
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="panel" style={{ '--accent': accent || 'var(--accent-blue)' }}>
@@ -256,7 +257,11 @@ export default function App() {
 
       es.addEventListener('error', (e) => {
         let msg = 'Pipeline error';
-        try { msg = JSON.parse(e.data).detail; } catch (_) {}
+        try {
+          msg = JSON.parse(e.data).detail;
+        } catch (err) {
+          console.warn('Failed to parse SSE error details:', err);
+        }
         setError(msg);
         setLiveAgent(null);
         setPendingApproval(null);
@@ -496,6 +501,21 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Pending Approval (Debugger step) ───────────────────────────── */}
+      {pendingApproval && (
+        <div className="approval-bar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Activity size={16} className="pulse" style={{ color: '#f59e0b' }} />
+            <span>
+              <strong>Debugger Paused:</strong> Step {pendingApproval.step} of Subtask {pendingApproval.subtask_index + 1} wants to call tool <code>{pendingApproval.tool}</code> with input: <code>{pendingApproval.tool_input}</code>
+            </span>
+          </div>
+          <button className="approval-btn" onClick={handleApprove}>
+            <Check size={14} /> Approve Step
+          </button>
+        </div>
+      )}
+
       {/* ── Main grid ───────────────────────────────────────────────────── */}
       <div className="dashboard-grid">
 
@@ -684,14 +704,18 @@ export default function App() {
                   </div>
                   <div className="eval-criteria">
                     <EvalCriterion label="Workflow Completed" passed={result.evaluation.workflow_completed} />
-                    <EvalCriterion label="Tool Called"        passed={result.evaluation.tool_called} />
-                    <EvalCriterion label="Task Completed"     passed={result.evaluation.task_completed} />
+                    <EvalCriterion label="Tool Use Health"    passed={result.evaluation.tool_use_health} />
+                    <EvalCriterion label="Answer Structured"  passed={result.evaluation.answer_structured} />
+                    <EvalCriterion label="Source Grounded"    passed={result.evaluation.source_grounded} />
+                    <EvalCriterion label="Execution Efficient" passed={result.evaluation.execution_efficient} />
                   </div>
                   {result.evaluation.details && (
                     <div className="eval-details">
                       <span className="mem-label">Details</span>
                       <div className="eval-detail-row"><span>Agents seen</span><span>{result.evaluation.details.agents_seen?.join(', ')}</span></div>
                       <div className="eval-detail-row"><span>Tool calls</span><span>{result.evaluation.details.tool_calls_count}</span></div>
+                      <div className="eval-detail-row"><span>Unique searches</span><span>{result.evaluation.details.unique_searches_count} / {result.evaluation.details.tool_calls_count}</span></div>
+                      <div className="eval-detail-row"><span>Citations found</span><span>{result.evaluation.details.citations_count}</span></div>
                       <div className="eval-detail-row"><span>Answer length</span><span>{result.evaluation.details.answer_length} chars</span></div>
                     </div>
                   )}

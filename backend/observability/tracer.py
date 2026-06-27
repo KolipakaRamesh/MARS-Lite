@@ -165,7 +165,7 @@ def trace_agent(span_name: str) -> Callable:
                 duration_ms = round((time.perf_counter() - t0) * 1000, 1)
 
                 # Extract token counts from the agent's returned llm_usage
-                usage_entries = result.get("llm_usage", [])
+                usage_entries = result.get("llm_usage", []) if isinstance(result, dict) else []
                 tokens_in  = sum(u.get("prompt_tokens", 0)     for u in usage_entries)
                 tokens_out = sum(u.get("completion_tokens", 0) for u in usage_entries)
                 model_name = usage_entries[0].get("model", "") if usage_entries else ""
@@ -191,9 +191,9 @@ def trace_agent(span_name: str) -> Callable:
                     **span,
                     "memory_context_tokens": state.get("memory_context_tokens", 0),
                     # Also include tool_calls if research agent produced any
-                    "tool_calls": result.get("tool_calls", []),
-                    "subtasks": result.get("subtasks"),
-                    "synthesized_answer": result.get("synthesized_answer"),
+                    "tool_calls": result.get("tool_calls", []) if isinstance(result, dict) else [],
+                    "subtasks": result.get("subtasks") if isinstance(result, dict) else None,
+                    "synthesized_answer": result.get("synthesized_answer") if isinstance(result, dict) else None,
                 })
 
         return wrapper
