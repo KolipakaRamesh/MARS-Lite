@@ -25,7 +25,7 @@ The UI behaves like a **mini LangSmith / Langfuse dashboard** built right into t
 | **Tool Calling** | `web_search` tool calls shown with input, output, and duration |
 | **Memory** | Simple JSON file stores last query, category, budget, timestamp |
 | **Observability** | Per-agent spans with start/end time, duration, token counts |
-| **Evaluation** | Rule-based scoring: workflow completed, tool called, task done |
+| **Evaluation** | Rule-based scoring: workflow, tool health, structure, citations, efficiency |
 | **Token Usage** | Per-agent token breakdown (in / out / total) with visual bars |
 | **Latency Tracking** | Per-agent duration with proportional bar chart + total time |
 
@@ -107,10 +107,8 @@ sequenceDiagram
     Memory-->>API: {last_query, last_category, last_budget, timestamp, history[]}
 
     API->>Eval: evaluate(final_state)
-    Eval->>Eval: Check agent_trace has planner+research+analyst
-    Eval->>Eval: Check tool_calls has web_search
-    Eval->>Eval: Check synthesized_answer is non-empty
-    Eval-->>API: {workflow_completed, tool_called, task_completed, score}
+    Eval->>Eval: Check 5 criteria: workflow, tool health,<br/>structure, citations, efficiency
+    Eval-->>API: {workflow_completed, tool_use_health, answer_structured,<br/>source_grounded, execution_efficient, score}
 
     %% ── FINAL RESULT ────────────────────────────────────────
     API-->>UI: SSE: result {answer, subtasks, tool_calls,<br/>llm_usage, agent_trace, evaluation, memory}
@@ -216,7 +214,7 @@ Single-pass synthesis. Receives all `raw_research[]` chunks concatenated into a 
 | 4 | **Token Metrics** | SSE `agent_end.tokens_in/out/total` per agent | Real-time during run |
 | 5 | **Latency Metrics** | SSE `agent_end.duration_ms` per agent | Real-time during run |
 | 6 | **Memory** | `GET /memory` → `data/memory.json` | On load + after run |
-| 7 | **Evaluation** | Rule-based: workflow / tool / task checks | After run completes |
+| 7 | **Evaluation** | Rule-based: 5 correctness, health & efficiency checks | After run completes |
 
 ---
 
@@ -278,21 +276,27 @@ Rule-based, deterministic checks. No LLM judge. No latency. No extra API cost.
 
 | Criterion | Check | Points |
 |---|---|---|
-| `workflow_completed` | All 3 agents appear in `agent_trace` | 33 |
-| `tool_called` | At least one `web_search` in `tool_calls` | 33 |
-| `task_completed` | `synthesized_answer` is non-empty | 33 + 1 bonus |
+| `workflow_completed` | All 3 agents (`planner`, `research`, `analyst`) executed | 20 |
+| `tool_use_health` | Web searches were performed and none returned errors or failed | 20 |
+| `answer_structured` | Synthesized answer is $>300$ characters and contains Markdown headers (`#` / `##`) | 20 |
+| `source_grounded` | The final answer contains footnotes (e.g. `[1]`) or markdown links to sources (auto-passes if no searches were needed) | 20 |
+| `execution_efficient` | The Research Agent executed without duplicate search queries (ReAct loop free) | 20 |
 
-**Score:** `0`, `33`, `66`, or `100`
+**Score:** Multiples of `20` from `0` to `100`.
 
 ```json
 {
   "workflow_completed": true,
-  "tool_called": true,
-  "task_completed": true,
+  "tool_use_health": true,
+  "answer_structured": true,
+  "source_grounded": true,
+  "execution_efficient": true,
   "score": 100,
   "details": {
     "agents_seen": ["analyst", "planner", "research"],
     "tool_calls_count": 2,
+    "unique_searches_count": 2,
+    "citations_count": 3,
     "answer_length": 1847
   }
 }
@@ -454,7 +458,7 @@ Runs the full pipeline and returns when complete.
     { "agent": "research", "model": "llama-3.1-8b-instruct", "prompt_tokens": 980, "completion_tokens": 340, "total_tokens": 1320, "latency_ms": 3200 },
     { "agent": "analyst",  "model": "llama-3.1-8b-instruct", "prompt_tokens": 1400,"completion_tokens": 620, "total_tokens": 2020, "latency_ms": 4100 }
   ],
-  "evaluation": { "workflow_completed": true, "tool_called": true, "task_completed": true, "score": 100 },
+  "evaluation": { "workflow_completed": true, "tool_use_health": true, "answer_structured": true, "source_grounded": true, "execution_efficient": true, "score": 100 },
   "memory": { "last_query": "What is RAG in AI?", "last_category": "AI/ML", "last_budget": null, "timestamp": "..." }
 }
 ```
